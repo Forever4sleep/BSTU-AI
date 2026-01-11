@@ -7,3 +7,7 @@ The Orchestrator is responsible for:
 
 The orchestrator routes user input based on classified intent.
 """
+
+from orchestrator.intent_classifier import IntentClassifier
+
+__all__ = ["IntentClassifier"]

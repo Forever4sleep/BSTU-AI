@@ -24,9 +24,8 @@ BSTU-AI/
 │   ├── telegram/         # Telegram bot interface
 │   └── webui/            # Open WebUI interface
 ├── config/                # Configuration files
-├── data/                  # Data storage
-│   ├── materials/        # BSTU learning materials (for RAG)
-│   └── schedules/        # Schedule and deadline data
+├── data/                  # Temporary data storage
+│   └── materials/        # Temporary storage for files being processed for RAG (deleted after indexing to Qdrant)
 ├── resources/             # Additional resources
 ├── tests/                 # Test suite
 └── notebooks/             # Jupyter notebooks
@@ -61,9 +60,8 @@ Both interfaces communicate with the orchestrator to handle user requests.
 Configuration files and settings for the system.
 
 ### `data/`
-Data storage directories:
-- **`materials/`**: BSTU-specific learning materials for RAG
-- **`schedules/`**: Schedule and deadline information
+Temporary data storage for processing:
+- **`materials/`**: Temporary storage for source files (PDF, DOCX, TXT, etc.) during RAG processing. Files are stored here temporarily while being processed and indexed into Qdrant, then can be deleted. Schedules are stored exclusively in PostgreSQL.
 
 ### `tests/`
 Test suite for unit tests, integration tests, and test utilities.

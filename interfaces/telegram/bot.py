@@ -9,6 +9,7 @@ import logging
 from typing import Optional
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -18,21 +19,26 @@ from telegram.ext import (
     filters,
 )
 
+from orchestrator import IntentClassifier
+from shared.intents.schemas import IntentClassification
+
 logger = logging.getLogger(__name__)
 
 
 class TelegramBot:
     """Telegram bot that handles user messages and routes them through the system."""
 
-    def __init__(self, token: str):
+    def __init__(self, token: str, intent_classifier: Optional[IntentClassifier] = None):
         """
         Initialize the Telegram bot.
 
         Args:
             token: Telegram bot token from BotFather
+            intent_classifier: Optional IntentClassifier instance. If None, will create one.
         """
         self.token = token
         self.application = Application.builder().token(token).build()
+        self.intent_classifier = intent_classifier or IntentClassifier()
         self._setup_handlers()
 
     def _setup_handlers(self):
@@ -77,13 +83,13 @@ class TelegramBot:
             "Выберите раздел ниже или просто напишите вопрос!"
         )
         keyboard = self._get_main_menu_keyboard()
-        await update.message.reply_text(welcome_message, reply_markup=keyboard)
+        await update.message.reply_text(welcome_message, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
     async def _handle_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /menu command - show main menu."""
         menu_message = "📋 Главное меню\n\nВыберите раздел:"
         keyboard = self._get_main_menu_keyboard()
-        await update.message.reply_text(menu_message, reply_markup=keyboard)
+        await update.message.reply_text(menu_message, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
     async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command."""
@@ -101,7 +107,7 @@ class TelegramBot:
             "Используйте кнопки меню или просто напишите вопрос!"
         )
         keyboard = self._get_main_menu_keyboard()
-        await update.message.reply_text(help_message, reply_markup=keyboard)
+        await update.message.reply_text(help_message, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
     async def _handle_button_click(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -129,7 +135,7 @@ class TelegramBot:
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")]
             ])
-            await query.edit_message_text(response, reply_markup=keyboard)
+            await query.edit_message_text(response, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
         elif callback_data == "academic":
             response = (
@@ -144,7 +150,7 @@ class TelegramBot:
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")]
             ])
-            await query.edit_message_text(response, reply_markup=keyboard)
+            await query.edit_message_text(response, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
         elif callback_data == "schedule":
             response = (
@@ -159,7 +165,7 @@ class TelegramBot:
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")]
             ])
-            await query.edit_message_text(response, reply_markup=keyboard)
+            await query.edit_message_text(response, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
         elif callback_data == "help":
             response = (
@@ -173,12 +179,12 @@ class TelegramBot:
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")]
             ])
-            await query.edit_message_text(response, reply_markup=keyboard)
+            await query.edit_message_text(response, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
         elif callback_data == "main_menu":
             response = "📋 Главное меню\n\nВыберите раздел:"
             keyboard = self._get_main_menu_keyboard()
-            await query.edit_message_text(response, reply_markup=keyboard)
+            await query.edit_message_text(response, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
     async def _handle_message(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -186,8 +192,7 @@ class TelegramBot:
         """
         Handle incoming text messages.
 
-        TODO: Route through orchestrator once it's implemented.
-        For now, this is a simple echo handler for experimentation.
+        Routes messages through the intent classifier and responds with detected intents.
         """
         user_message = update.message.text
         user_id = update.effective_user.id
@@ -195,37 +200,71 @@ class TelegramBot:
 
         logger.info(f"Received message from {username} ({user_id}): {user_message}")
 
-        # TODO: Replace this with orchestrator call
-        # response = await self.orchestrator.process(user_message)
-        
-        # For now, echo the message back with a simple response
-        response = self._simple_response(user_message)
+        try:
+            # Classify intents using the orchestrator
+            classification = await self.intent_classifier.classify(user_message)
+            response = self._format_intent_response(user_message, classification)
+        except Exception as e:
+            logger.error(f"Error processing message: {e}", exc_info=True)
+            response = (
+                "❌ Произошла ошибка при обработке вашего сообщения. "
+                "Попробуйте еще раз."
+            )
 
-        await update.message.reply_text(response)
+        await update.message.reply_text(response, parse_mode=ParseMode.HTML)
 
-    def _simple_response(self, message: str) -> str:
+    def _format_intent_response(
+        self, message: str, classification: IntentClassification
+    ) -> str:
         """
-        Simple response handler for experimentation.
-
-        Replace this with orchestrator integration later.
+        Format the response showing detected intents.
 
         Args:
-            message: User's message
+            message: Original user message
+            classification: IntentClassification object
 
         Returns:
-            Response text
+            Formatted response text
         """
-        # Simple echo with some basic responses for testing
-        message_lower = message.lower()
+        intents = classification.intents
+        confidence = classification.confidence
 
-        if any(greeting in message_lower for greeting in ["привет", "здравствуй", "здравствуйте", "hi", "hello", "hey"]):
-            return "Привет! Чем могу помочь? 👋"
+        # Handle empty intents
+        if not intents:
+            response = (
+                "🔍 **Результат классификации:**\n\n"
+                "❌ Интенты не обнаружены.\n\n"
+                "Возможно, ваше сообщение является приветствием или "
+                "не содержит четкого запроса. Попробуйте спросить более конкретно!"
+            )
+            return response
 
-        if "помощь" in message_lower or "help" in message_lower:
-            return "Я здесь, чтобы помочь! Попробуйте спросить меня об учебных темах, преподавателях или расписании."
+        # Format detected intents
+        intent_icons = {
+            "learning.explain": "📖",
+            "learning.summarize": "📝",
+            "learning.quiz.generate": "📋",
+            "learning.quiz.grade": "✅",
+            "learning.plan.revision": "📅",
+            "academic.professor.profile": "👨‍🏫",
+            "academic.course.requirements": "📚",
+            "schedule.lookup": "🔍",
+            "schedule.deadline.lookup": "⏰",
+            "schedule.reminder.create": "🔔",
+        }
 
-        # Default echo response
-        return f"📝 Вы сказали: {message}\n\n(Интеграция с оркестратором скоро появится!)"
+        response = (
+            "🔍 <b>Результат классификации:</b>\n\n"
+            "<b>Обнаруженные интенты:</b>\n"
+        )
+
+        for intent in intents:
+            icon = intent_icons.get(intent, "•")
+            response += f"{icon} {intent}\n"
+
+        response += f"\n📊 <b>Уверенность:</b> {confidence:.1%}"
+
+        return response
 
     async def start(self):
         """Start the bot."""
