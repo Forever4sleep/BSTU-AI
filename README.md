@@ -1,51 +1,83 @@
 # BSTU-AI
 
-## Purpose 
+A multi-agent AI system designed to help students automate academic tasks, accelerate learning, and enhance productivity at Belarusian State Technical University (BSTU).
 
-BSTU-AI is a diploma project which introduces a multi-agent system that helps students automate certain activities, learn stuff quicker and be overall more productive. 
+---
 
-## Functionality
+## Overview
 
-Currently, I am planning on building three separate agents with their own responsibility domain.
+BSTU-AI is a diploma project that introduces an intelligent assistant system built on a multi-agent architecture. The system consists of specialized agents that handle different aspects of student life, all coordinated through a central orchestrator that understands user intent and routes requests appropriately.
 
-| Agent | What it does |
-| ----- | ------------ |
-| <b>Learning Agent</b> | Helps students learn a subject faster using pre-loaded materials: notes, lectures and so on.   Uses the RAG concept as the underlying mechanism of using materials unique to BSTU. I am also planning on adding quizes for better retention. |
-| <b>Academic Agent</b> | Used as the go-to helper to retrieve useful information about the professors, exam requirements, passing criterion – all in one place.|  
-| <b>Scheduler Agent</b> | Buddy that helps you set a reminder for an upcoming coursework deadline, exam – all via Telegram and zero buttons, just raw text! |
+The system is designed to work entirely through natural language interaction, with no button-based interfaces—just pure conversational interaction.
 
-Agents are managed by the <b>orchestator</b>.
-An orchestator, in the content of BSTU-AI, is a mechanism that helps understand the end user, what they're asking right now. It extracts the intents of a user's request and then decides which agent to utilize.
+---
 
-Right now there's an undefined number of intents, though there are draft ones. As I make progress in building this project, I am going to fill up this list more and more and make it more accurate. 
+## Tech Stack
 
-### Learning Agent
+- **Language**: Python
+- **LLM Framework**: LangChain, LangGraph
+- **LLM Provider**: OpenRouter (currently)
+- **Database**: Qdrant (for RAG), PostgreSQL (for structured data)
+- **Interface**: Telegram Bot API, Open WebUI (planned)
 
-| Intent | Description | 
-| ------ | ----------- | 
-| learning.explain | explain a topic using reference material specific to BSTU. | 
-| learning.summarize | create a summary of a topic. | 
-| learning.quiz.generate | come up with a quiz to test the user's knowledge. | 
-| learning.quiz.grade | check the user's answers and provide explanations to the mistakes made. | 
-| learning.plan.revision | propose a revision plan in accordance with the user's weak links. | 
+---
 
+## Architecture
 
-### Academic Agent 
+The system follows a multi-agent architecture pattern where specialized agents handle distinct domains of functionality. All agents are managed by a central **orchestrator** that:
 
-| Intent | Description | 
-| ------ | ----------- | 
-| academic.professor.profile | provide info on a professor and their courses. |
-| academic.course.requirements | list course requirements to sit for the exam, evaluation criterion |
+1. Extracts user intents from natural language input
+2. Routes requests to the appropriate agent based on detected intents
+3. Coordinates responses back to the user
 
-### Scheduler Agent
+---
 
-| Intent | Description | 
-| ------ | ----------- | 
-| schedule.lookup | look up the certain event's date, class schedule. |
-| schedule.deadline.lookup | find deadline (if there's one) |
-| schedule.reminder.create | create a reminder (implemented via Telegram) |
-| schedule.reminder.edit | edit an existing reminder |
-| schedule.reminder.delete | delete an existing reminder |
-| schedule.reminder.view | view user's reminders (shows up to 5 reminders) |
+## Agents
 
-TO BE CONTINUED...
+The system currently consists of three specialized agents, each with a clearly defined responsibility domain:
+
+| Agent | Description |
+|-------|-------------|
+| **Learning Agent** | Helps students learn subjects faster using pre-loaded BSTU-specific materials (notes, lectures, etc.). Utilizes RAG (Retrieval-Augmented Generation) to provide context-aware explanations. Includes quiz generation and grading capabilities for better retention. |
+| **Academic Agent** | Provides centralized access to academic information including professor profiles, course requirements, exam conditions, and evaluation criteria. |
+| **Scheduler Agent** | Manages reminders and deadlines for coursework, exams, and other academic events. Fully natural-language driven with Telegram integration. | 
+
+---
+
+## Supported Intents
+
+The system recognizes various intents that are routed to the appropriate agents. The intent list is continuously evolving as the project develops.
+
+### Learning Agent Intents
+
+| Intent | Description |
+|--------|-------------|
+| `learning.explain` | Explain a topic using BSTU-specific reference materials |
+| `learning.summarize` | Create a summary of a topic or material |
+| `learning.quiz.generate` | Generate a quiz to test the user's knowledge |
+| `learning.quiz.grade` | Grade user's quiz answers and provide explanations for mistakes |
+| `learning.plan.revision` | Propose a revision plan based on identified weak areas |
+
+### Academic Agent Intents
+
+| Intent | Description |
+|--------|-------------|
+| `academic.professor.profile` | Provide information about a professor and their courses |
+| `academic.course.requirements` | List course requirements, exam conditions, and evaluation criteria |
+
+### Scheduler Agent Intents
+
+| Intent | Description |
+|--------|-------------|
+| `schedule.lookup` | Look up event dates or class schedules |
+| `schedule.deadline.lookup` | Find deadlines for coursework or exams |
+| `schedule.reminder.create` | Create a reminder for an upcoming event or deadline |
+| `schedule.reminder.edit` | Edit an existing reminder |
+| `schedule.reminder.delete` | Delete an existing reminder |
+| `schedule.reminder.view` | View user's reminders (displays up to 5 reminders) |
+
+---
+
+## Project Status
+
+This project is currently under active development. The intent list and functionality are continuously being expanded and refined.
