@@ -9,5 +9,6 @@ The orchestrator routes user input based on classified intent.
 """
 
 from orchestrator.intent_classifier import IntentClassifier
+from orchestrator.router import IntentRouter
 
-__all__ = ["IntentClassifier"]
+__all__ = ["IntentClassifier", "IntentRouter"]

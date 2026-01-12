@@ -5,6 +5,7 @@ Uses ChatOpenAI with OpenRouter to classify user intents from messages
 using structured output from LangChain.
 """
 
+import json
 import logging
 
 from langchain_openai import ChatOpenAI
@@ -71,6 +72,12 @@ class IntentClassifier:
         try:
             user_prompt = f"Classify the following user message:\n\n{message}"
 
+            logger.info("=" * 80)
+            logger.info("🔍 INTENT CLASSIFICATION REQUEST")
+            logger.info("=" * 80)
+            logger.info(f"📝 User Message: {message}")
+            logger.info(f"🤖 Model: {self.model}")
+
             # Use structured output to get IntentClassification
             result = await self.llm.ainvoke(
                 [
@@ -78,6 +85,23 @@ class IntentClassifier:
                     ("user", user_prompt),
                 ]
             )
+
+            # Log raw JSON structured output
+            logger.info("-" * 80)
+            logger.info("📦 RAW JSON STRUCTURED OUTPUT:")
+            logger.info("-" * 80)
+            
+            # Convert result to dict to show raw JSON structure
+            if isinstance(result, IntentClassification):
+                # Convert Pydantic model to dict
+                raw_json = result.model_dump()
+            elif isinstance(result, dict):
+                raw_json = result
+            else:
+                # Try to convert to dict
+                raw_json = dict(result) if hasattr(result, '__dict__') else str(result)
+            
+            logger.info(json.dumps(raw_json, indent=2, ensure_ascii=False))
 
             # Validate the result
             if not isinstance(result, IntentClassification):
@@ -87,10 +111,34 @@ class IntentClassifier:
                 else:
                     raise ValueError(f"Unexpected result type: {type(result)}")
 
-            logger.info(
-                f"Classified message: '{message[:50]}...' -> "
-                f"Intents: {result.intents}, Confidence: {result.confidence}"
-            )
+            # Log structured output
+            logger.info("-" * 80)
+            logger.info("📊 STRUCTURED OUTPUT:")
+            logger.info("-" * 80)
+            
+            # Log as JSON for readability
+            output_dict = {
+                "intents": result.intents,
+                "confidence": result.confidence,
+                "reasoning": result.reasoning,
+            }
+            logger.info(json.dumps(output_dict, indent=2, ensure_ascii=False))
+            
+            # Log intents separately for clarity
+            logger.info("-" * 80)
+            logger.info("🎯 DETECTED INTENTS:")
+            logger.info("-" * 80)
+            if result.intents:
+                for i, intent in enumerate(result.intents, 1):
+                    logger.info(f"  {i}. {intent}")
+            else:
+                logger.info("  ❌ No intents detected")
+            
+            logger.info("-" * 80)
+            logger.info(f"📈 Confidence: {result.confidence:.1%}")
+            if result.reasoning:
+                logger.info(f"💭 Reasoning: {result.reasoning}")
+            logger.info("=" * 80)
 
             return result
 

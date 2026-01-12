@@ -31,6 +31,10 @@ class ScheduleIntent(str, Enum):
     LOOKUP = "schedule.lookup"
     DEADLINE_LOOKUP = "schedule.deadline.lookup"
     REMINDER_CREATE = "schedule.reminder.create"
+    REMINDER_EDIT = "schedule.reminder.edit"
+    REMINDER_DELETE = "schedule.reminder.delete"
+    REMINDER_LIST = "schedule.reminder.list"
+    REMINDER_VIEW = "schedule.reminder.view"
 
 
 class IntentClassification(BaseModel):
