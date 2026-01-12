@@ -60,6 +60,9 @@ class TelegramBot:
         self.intent_router: Optional[IntentRouter] = None
         self.reminder_service: Optional[ReminderService] = None
 
+        # State management for reminder editing
+        self.editing_reminders: dict[int, str] = {}  # user_id -> reminder_id
+
         self._setup_handlers()
 
     def _setup_handlers(self):
@@ -268,6 +271,42 @@ class TelegramBot:
             )
             await query.answer("Напоминание отменено")
 
+        elif callback_data.startswith("reminder_"):
+            # Handle reminder selection: reminder_<reminder_id>_<action>
+            parts = callback_data.split("_")
+            if len(parts) >= 3:
+                reminder_id = parts[1]
+                action = parts[2]
+                await self._handle_reminder_action(query, user_id, reminder_id, action)
+
+        elif callback_data.startswith("edit_reminder_"):
+            # Handle edit reminder button: edit_reminder_<reminder_id>
+            reminder_id = callback_data.replace("edit_reminder_", "")
+            self.editing_reminders[user_id] = reminder_id
+            await query.edit_message_text(
+                "✏️ Опишите, что вы хотите изменить в напоминании.\n\n"
+                "Например: \"Измени дату на завтра в 15:00\" или \"Измени сообщение на 'Сдать курсовую'\"",
+                parse_mode=ParseMode.HTML
+            )
+
+        elif callback_data.startswith("delete_reminder_"):
+            # Handle delete reminder button: delete_reminder_<reminder_id>
+            reminder_id = callback_data.replace("delete_reminder_", "")
+            await self._handle_reminder_delete(query, user_id, reminder_id)
+
+        elif callback_data.startswith("confirm_delete_"):
+            # Handle delete confirmation: confirm_delete_<reminder_id>
+            reminder_id = callback_data.replace("confirm_delete_", "")
+            await self._confirm_delete_reminder(query, user_id, reminder_id)
+
+        elif callback_data == "cancel_reminder_menu" or callback_data == "cancel_delete":
+            # Handle menu cancellation
+            await query.edit_message_text(
+                "❌ Операция отменена.",
+                parse_mode=ParseMode.HTML,
+            )
+            await query.answer("Операция отменена")
+
     async def _handle_message(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ):
@@ -286,13 +325,26 @@ class TelegramBot:
             # Classify intents using the orchestrator
             classification = await self.intent_classifier.classify(user_message)
 
+            # Check if user is in editing state
+            if user_id in self.editing_reminders:
+                reminder_id = self.editing_reminders[user_id]
+                await self._handle_reminder_edit_text(
+                    update, context, reminder_id, user_message
+                )
+                return
+
             # Route to appropriate agent via router
             if self.intent_router:
                 router_response = await self.intent_router.route(
                     classification, user_message, user_id
                 )
                 if router_response:
-                    if router_response.needs_confirmation:
+                    if router_response.show_reminder_menu:
+                        # Show reminder selection menu
+                        await self._show_reminder_menu(
+                            update, router_response.message, router_response.confirmation_data.get("action")
+                        )
+                    elif router_response.needs_confirmation:
                         # Store pending reminder in user_data for confirmation
                         context.user_data["pending_reminder"] = router_response.confirmation_data
                         
@@ -406,6 +458,206 @@ class TelegramBot:
         )
 
         logger.info("Initialized all services")
+
+    async def _show_reminder_menu(
+        self, update: Update, message: str, action: str
+    ):
+        """Show reminder selection menu with buttons."""
+        user_id = update.effective_user.id
+        reminders = await self.database_service.get_user_reminders(user_id, limit=5)
+
+        if not reminders:
+            await update.message.reply_text(
+                "📋 У вас нет напоминаний.", parse_mode=ParseMode.HTML
+            )
+            return
+
+        keyboard = []
+        for reminder in reminders:
+            date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
+            button_text = f"{reminder.message[:30]}... ({date_str})"
+            if len(reminder.message) <= 30:
+                button_text = f"{reminder.message} ({date_str})"
+            keyboard.append([
+                InlineKeyboardButton(
+                    button_text,
+                    callback_data=f"reminder_{reminder.id}_{action}",
+                )
+            ])
+
+        keyboard.append([
+            InlineKeyboardButton("❌ Отмена", callback_data="cancel_reminder_menu")
+        ])
+
+        await update.message.reply_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.HTML,
+        )
+
+    async def _handle_reminder_action(
+        self, query, user_id: int, reminder_id: str, action: str
+    ):
+        """Handle reminder selection - show edit/delete buttons."""
+        from uuid import UUID
+
+        try:
+            reminder_uuid = UUID(reminder_id)
+            reminder = await self.database_service.get_reminder_by_id(
+                reminder_uuid, user_id
+            )
+
+            if not reminder:
+                await query.answer("Напоминание не найдено", show_alert=True)
+                return
+
+            date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
+            message = (
+                f"📝 Напоминание:\n\n"
+                f"💬 {reminder.message}\n"
+                f"📅 {date_str}\n"
+                f"🆔 ID: {reminder.id}\n\n"
+                f"Выберите действие:"
+            )
+
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "✏️ Изменить", callback_data=f"edit_reminder_{reminder_id}"
+                    ),
+                    InlineKeyboardButton(
+                        "🗑️ Удалить", callback_data=f"delete_reminder_{reminder_id}"
+                    ),
+                ],
+                [InlineKeyboardButton("❌ Отмена", callback_data="cancel_reminder_menu")],
+            ])
+
+            await query.edit_message_text(message, reply_markup=keyboard)
+
+        except Exception as e:
+            logger.error(f"Error handling reminder action: {e}", exc_info=True)
+            await query.answer("Ошибка при обработке запроса", show_alert=True)
+
+    async def _handle_reminder_edit_text(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, reminder_id: str, user_message: str
+    ):
+        """Handle text input for editing reminder."""
+        from uuid import UUID
+
+        user_id = update.effective_user.id
+
+        try:
+            reminder_uuid = UUID(reminder_id)
+            # Extract edit information using agent
+            reminder = await self.scheduler_agent.extract_reminder_info(
+                user_message, user_id
+            )
+
+            # Update reminder in database
+            updated = await self.database_service.update_reminder(
+                reminder_id=reminder_uuid,
+                user_id=user_id,
+                message=reminder.message if reminder.message else None,
+                reminder_date=reminder.reminder_date if reminder.reminder_date else None,
+                timezone=reminder.timezone if reminder.timezone != "GMT+3" else None,
+                recurring_pattern=reminder.recurring.value if reminder.recurring else None,
+            )
+
+            # Clear editing state
+            self.editing_reminders.pop(user_id, None)
+
+            if updated:
+                date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
+                await update.message.reply_text(
+                    f"✅ Напоминание успешно обновлено!\n\n"
+                    f"📝 Сообщение: {reminder.message}\n"
+                    f"📅 Дата: {date_str}",
+                    parse_mode=ParseMode.HTML,
+                )
+            else:
+                await update.message.reply_text(
+                    "❌ Не удалось обновить напоминание.",
+                    parse_mode=ParseMode.HTML,
+                )
+
+        except Exception as e:
+            logger.error(f"Error editing reminder: {e}", exc_info=True)
+            self.editing_reminders.pop(user_id, None)
+            await update.message.reply_text(
+                "❌ Произошла ошибка при редактировании напоминания. Попробуйте еще раз.",
+                parse_mode=ParseMode.HTML,
+            )
+
+    async def _handle_reminder_delete(self, query, user_id: int, reminder_id: str):
+        """Show delete confirmation."""
+        from uuid import UUID
+
+        try:
+            reminder_uuid = UUID(reminder_id)
+            reminder = await self.database_service.get_reminder_by_id(
+                reminder_uuid, user_id
+            )
+
+            if not reminder:
+                await query.answer("Напоминание не найдено", show_alert=True)
+                return
+
+            message = (
+                f"⚠️ Вы уверены, что хотите удалить это напоминание?\n\n"
+                f"💬 {reminder.message}\n"
+                f"📅 {reminder.reminder_date.strftime('%Y-%m-%d %H:%M')}\n\n"
+                f"Это действие нельзя отменить."
+            )
+
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "✅ Да, удалить", callback_data=f"confirm_delete_{reminder_id}"
+                    ),
+                    InlineKeyboardButton("❌ Отмена", callback_data="cancel_delete"),
+                ]
+            ])
+
+            await query.edit_message_text(message, reply_markup=keyboard)
+
+        except Exception as e:
+            logger.error(f"Error handling delete: {e}", exc_info=True)
+            await query.answer("Ошибка при обработке запроса", show_alert=True)
+
+    async def _confirm_delete_reminder(self, query, user_id: int, reminder_id: str):
+        """Actually delete the reminder."""
+        from uuid import UUID
+
+        try:
+            reminder_uuid = UUID(reminder_id)
+            reminder = await self.database_service.get_reminder_by_id(
+                reminder_uuid, user_id
+            )
+
+            if not reminder:
+                await query.answer("Напоминание не найдено", show_alert=True)
+                return
+
+            deleted = await self.database_service.delete_reminder(reminder_uuid, user_id)
+
+            if deleted:
+                await query.edit_message_text(
+                    f"✅ Напоминание успешно удалено!\n\n"
+                    f"Удалено: {reminder.message}",
+                    parse_mode=ParseMode.HTML,
+                )
+            else:
+                await query.edit_message_text(
+                    "❌ Не удалось удалить напоминание.",
+                    parse_mode=ParseMode.HTML,
+                )
+
+        except Exception as e:
+            logger.error(f"Error deleting reminder: {e}", exc_info=True)
+            await query.edit_message_text(
+                "❌ Произошла ошибка при удалении напоминания.",
+                parse_mode=ParseMode.HTML,
+            )
 
     async def start(self):
         """Start the bot and all services."""

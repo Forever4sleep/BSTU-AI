@@ -231,3 +231,36 @@ class SchedulerAgent:
         )
 
         return message
+
+    async def view_reminders(self, user_id: int, limit: int = 5) -> str:
+        """
+        View user's reminders.
+
+        Args:
+            user_id: Telegram user ID
+            limit: Maximum number of reminders to show (default: 5)
+
+        Returns:
+            Formatted message with reminders list
+        """
+        reminders = await self.database_service.get_user_reminders(user_id, limit)
+
+        if not reminders:
+            return "📋 У вас пока нет напоминаний."
+
+        message = f"📋 Ваши напоминания (показано до {limit}):\n\n"
+
+        for idx, reminder in enumerate(reminders, 1):
+            date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
+            recurring_str = ""
+            if reminder.recurring_pattern:
+                recurring_str = f" (повтор: {reminder.recurring_pattern})"
+
+            message += (
+                f"{idx}. 🔔 {reminder.message}\n"
+                f"   📅 {date_str}{recurring_str}\n"
+                f"   ID: {reminder.id}\n\n"
+            )
+
+        return message
+

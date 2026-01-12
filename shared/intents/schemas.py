@@ -49,7 +49,8 @@ class IntentClassification(BaseModel):
         "Possible intents: learning.explain, learning.summarize, learning.quiz.generate, "
         "learning.quiz.grade, learning.plan.revision, academic.professor.profile, "
         "academic.course.requirements, schedule.lookup, schedule.deadline.lookup, "
-        "schedule.reminder.create. Return an empty list if no intents are detected."
+        "schedule.reminder.create, schedule.reminder.edit, schedule.reminder.delete, "
+        "schedule.reminder.view. Return an empty list if no intents are detected."
     )
     
     confidence: float = Field(

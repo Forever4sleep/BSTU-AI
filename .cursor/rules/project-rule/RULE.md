@@ -115,11 +115,15 @@ Helps students manage academic time and deadlines.
 - `schedule.lookup` — look up class schedules or event dates.
 - `schedule.deadline.lookup` — find coursework or exam deadlines.
 - `schedule.reminder.create` — create reminders via Telegram.
+- `schedule.reminder.edit` — edit existing reminders using natural language.
+- `schedule.reminder.delete` — delete reminders via Telegram or chat input.
+- `schedule.reminder.list` — list all active reminders for the user.
 
 **Constraints**
 - Always confirm time-sensitive information when ambiguity exists.
 - Do not create reminders without sufficient temporal data.
 - Keep interactions concise and action-oriented.
+- Reminders do not have priorities. 
 
 ---
 

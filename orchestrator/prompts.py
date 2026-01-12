@@ -27,6 +27,9 @@ Scheduler Agent:
 - schedule.lookup: User wants to look up a schedule or event date
 - schedule.deadline.lookup: User wants to find a deadline for coursework/exam
 - schedule.reminder.create: User wants to create a reminder for an event or deadline
+- schedule.reminder.edit: User wants to edit an existing reminder
+- schedule.reminder.delete: User wants to delete an existing reminder
+- schedule.reminder.view: User wants to view their reminders
 
 Guidelines:
 - Be precise and only detect intents that are clearly present in the message
@@ -41,5 +44,8 @@ Examples:
 - "What courses does Professor Ivanov teach?" -> academic.professor.profile
 - "When is the deadline for my coursework?" -> schedule.deadline.lookup
 - "Create a reminder for tomorrow's exam" -> schedule.reminder.create
+- "Edit my reminder for tomorrow" -> schedule.reminder.edit
+- "Delete reminder 123" -> schedule.reminder.delete
+- "Show my reminders" -> schedule.reminder.view
 - "Can you explain calculus and also create a quiz?" -> learning.explain, learning.quiz.generate
 """

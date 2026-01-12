@@ -240,14 +240,14 @@ class ReminderDatabaseService:
             return None
 
     async def get_user_reminders(
-        self, user_id: int, limit: int = 50
+        self, user_id: int, limit: int = 5
     ) -> List[ReminderRecord]:
         """
-        Get all reminders for a specific user.
+        Get all reminders for a specific user (up to limit).
 
         Args:
             user_id: Telegram user ID
-            limit: Maximum number of reminders to return
+            limit: Maximum number of reminders to return (default: 5)
 
         Returns:
             List of ReminderRecord objects for the user
@@ -259,8 +259,8 @@ class ReminderDatabaseService:
         SELECT id, user_id, message, reminder_date, timezone,
                recurring_pattern, sent, created_at, updated_at
         FROM reminders
-        WHERE user_id = $1
-        ORDER BY reminder_date DESC
+        WHERE user_id = $1 AND sent = FALSE
+        ORDER BY reminder_date ASC
         LIMIT $2
         """
 
@@ -284,4 +284,155 @@ class ReminderDatabaseService:
                 return reminders
         except Exception as e:
             logger.error(f"Failed to get reminders for user {user_id}: {e}")
+            raise
+
+    async def get_reminder_by_id(
+        self, reminder_id: UUID, user_id: int
+    ) -> Optional[ReminderRecord]:
+        """
+        Get a specific reminder by ID for a user.
+
+        Args:
+            reminder_id: UUID of the reminder
+            user_id: Telegram user ID (for security - ensures user owns the reminder)
+
+        Returns:
+            ReminderRecord if found, None otherwise
+
+        Raises:
+            asyncpg.exceptions.PostgresError: If database operation fails
+        """
+        query = """
+        SELECT id, user_id, message, reminder_date, timezone,
+               recurring_pattern, sent, created_at, updated_at
+        FROM reminders
+        WHERE id = $1 AND user_id = $2
+        """
+
+        try:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow(query, reminder_id, user_id)
+                if not row:
+                    return None
+
+                return ReminderRecord(
+                    id=row["id"],
+                    user_id=row["user_id"],
+                    message=row["message"],
+                    reminder_date=row["reminder_date"],
+                    timezone=row["timezone"],
+                    recurring_pattern=row["recurring_pattern"],
+                    sent=row["sent"],
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                )
+        except Exception as e:
+            logger.error(f"Failed to get reminder {reminder_id}: {e}")
+            raise
+
+    async def update_reminder(
+        self,
+        reminder_id: UUID,
+        user_id: int,
+        message: Optional[str] = None,
+        reminder_date: Optional[datetime] = None,
+        timezone: Optional[str] = None,
+        recurring_pattern: Optional[str] = None,
+    ) -> bool:
+        """
+        Update an existing reminder.
+
+        Args:
+            reminder_id: UUID of the reminder to update
+            user_id: Telegram user ID (for security)
+            message: New message text (if provided)
+            reminder_date: New reminder date (if provided)
+            timezone: New timezone (if provided)
+            recurring_pattern: New recurring pattern (if provided)
+
+        Returns:
+            True if reminder was updated, False if not found
+
+        Raises:
+            asyncpg.exceptions.PostgresError: If database operation fails
+        """
+        # Build update query dynamically based on provided fields
+        updates = []
+        params = []
+        param_idx = 1
+
+        if message is not None:
+            updates.append(f"message = ${param_idx}")
+            params.append(message)
+            param_idx += 1
+
+        if reminder_date is not None:
+            updates.append(f"reminder_date = ${param_idx}")
+            params.append(reminder_date)
+            param_idx += 1
+
+        if timezone is not None:
+            updates.append(f"timezone = ${param_idx}")
+            params.append(timezone)
+            param_idx += 1
+
+        if recurring_pattern is not None:
+            updates.append(f"recurring_pattern = ${param_idx}")
+            params.append(recurring_pattern)
+            param_idx += 1
+
+        if not updates:
+            return False  # Nothing to update
+
+        updates.append(f"updated_at = NOW()")
+        params.append(reminder_id)
+        params.append(user_id)
+
+        query = f"""
+        UPDATE reminders
+        SET {', '.join(updates)}
+        WHERE id = ${param_idx} AND user_id = ${param_idx + 1}
+        RETURNING id
+        """
+
+        try:
+            async with self.pool.acquire() as conn:
+                result = await conn.fetchval(query, *params)
+                if result:
+                    logger.info(f"Updated reminder {reminder_id} for user {user_id}")
+                    return True
+                return False
+        except Exception as e:
+            logger.error(f"Failed to update reminder {reminder_id}: {e}")
+            raise
+
+    async def delete_reminder(self, reminder_id: UUID, user_id: int) -> bool:
+        """
+        Delete a reminder.
+
+        Args:
+            reminder_id: UUID of the reminder to delete
+            user_id: Telegram user ID (for security)
+
+        Returns:
+            True if reminder was deleted, False if not found
+
+        Raises:
+            asyncpg.exceptions.PostgresError: If database operation fails
+        """
+        query = """
+        DELETE FROM reminders
+        WHERE id = $1 AND user_id = $2
+        RETURNING id
+        """
+
+        try:
+            async with self.pool.acquire() as conn:
+                result = await conn.fetchval(query, reminder_id, user_id)
+                if result:
+                    logger.info(f"Deleted reminder {reminder_id} for user {user_id}")
+                    return True
+                return False
+        except Exception as e:
+            logger.error(f"Failed to delete reminder {reminder_id}: {e}")
             raise

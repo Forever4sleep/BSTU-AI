@@ -19,6 +19,7 @@ class RouterResponse:
     message: str
     needs_confirmation: bool = False
     confirmation_data: Optional[dict] = None
+    show_reminder_menu: bool = False  # Show reminder selection menu
 
 
 class IntentRouter:
@@ -52,33 +53,73 @@ class IntentRouter:
         if not intents:
             return None
 
-        # Route to scheduler agent for reminder creation
-        if "schedule.reminder.create" in intents and self.scheduler_agent:
+        # Route to scheduler agent for reminder operations
+        if self.scheduler_agent:
             try:
-                # Extract reminder info (don't save to DB yet)
-                reminder = await self.scheduler_agent.extract_reminder_info(
-                    user_message, user_id
-                )
-                
-                # Format confirmation message
-                confirmation_message = self.scheduler_agent.format_reminder_confirmation(
-                    reminder
-                )
-                
-                # Return response with confirmation data
-                return RouterResponse(
-                    message=confirmation_message,
-                    needs_confirmation=True,
-                    confirmation_data={
-                        "type": "reminder",
-                        "reminder": reminder.model_dump_json(),
-                    },
-                )
+                # Create reminder
+                if "schedule.reminder.create" in intents:
+                    # Extract reminder info (don't save to DB yet)
+                    reminder = await self.scheduler_agent.extract_reminder_info(
+                        user_message, user_id
+                    )
+                    
+                    # Format confirmation message
+                    confirmation_message = (
+                        self.scheduler_agent.format_reminder_confirmation(reminder)
+                    )
+                    
+                    # Return response with confirmation data
+                    return RouterResponse(
+                        message=confirmation_message,
+                        needs_confirmation=True,
+                        confirmation_data={
+                            "type": "reminder",
+                            "reminder": reminder.model_dump_json(),
+                        },
+                    )
+
+                # View reminders
+                elif "schedule.reminder.view" in intents:
+                    reminders_message = await self.scheduler_agent.view_reminders(
+                        user_id, limit=5
+                    )
+                    return RouterResponse(message=reminders_message)
+
+                # Edit reminder - show menu to select reminder
+                elif "schedule.reminder.edit" in intents:
+                    reminders = await self.scheduler_agent.database_service.get_user_reminders(
+                        user_id, limit=5
+                    )
+                    if not reminders:
+                        return RouterResponse(
+                            message="📋 У вас нет напоминаний для редактирования."
+                        )
+                    return RouterResponse(
+                        message="📝 Выберите напоминание для редактирования:",
+                        show_reminder_menu=True,
+                        confirmation_data={"action": "edit"},
+                    )
+
+                # Delete reminder - show menu to select reminder
+                elif "schedule.reminder.delete" in intents:
+                    reminders = await self.scheduler_agent.database_service.get_user_reminders(
+                        user_id, limit=5
+                    )
+                    if not reminders:
+                        return RouterResponse(
+                            message="📋 У вас нет напоминаний для удаления."
+                        )
+                    return RouterResponse(
+                        message="🗑️ Выберите напоминание для удаления:",
+                        show_reminder_menu=True,
+                        confirmation_data={"action": "delete"},
+                    )
+
             except Exception as e:
                 logger.error(f"Error routing to scheduler agent: {e}", exc_info=True)
                 return RouterResponse(
                     message=(
-                        "❌ Произошла ошибка при создании напоминания. "
+                        "❌ Произошла ошибка при обработке запроса. "
                         "Попробуйте еще раз."
                     )
                 )

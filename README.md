@@ -43,6 +43,9 @@ Right now there's an undefined number of intents, though there are draft ones. A
 | ------ | ----------- | 
 | schedule.lookup | look up the certain event's date, class schedule. |
 | schedule.deadline.lookup | find deadline (if there's one) |
-| schedule.reminder.create | create a reminder (implemented via Telegram)| 
+| schedule.reminder.create | create a reminder (implemented via Telegram) |
+| schedule.reminder.edit | edit an existing reminder |
+| schedule.reminder.delete | delete an existing reminder |
+| schedule.reminder.view | view user's reminders (shows up to 5 reminders) |
 
 TO BE CONTINUED...
