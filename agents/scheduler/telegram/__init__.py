@@ -1,9 +1,6 @@
 """
 Telegram Integration Module
 
-Handles Telegram-based reminders and notifications.
+This module is deprecated. The reminder service has been moved to
+services/reminder_service as a standalone microservice.
 """
-
-from agents.scheduler.telegram.service import ReminderService
-
-__all__ = ["ReminderService"]

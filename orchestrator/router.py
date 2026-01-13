@@ -56,17 +56,20 @@ class IntentRouter:
         # Route to scheduler agent for reminder operations
         if self.scheduler_agent:
             try:
-                # Create reminder
+                # Create reminder(s)
                 if "schedule.reminder.create" in intents:
                     # Extract reminder info (don't save to DB yet)
-                    reminder = await self.scheduler_agent.extract_reminder_info(
+                    reminders = await self.scheduler_agent.extract_reminder_info(
                         user_message, user_id
                     )
                     
                     # Format confirmation message
                     confirmation_message = (
-                        self.scheduler_agent.format_reminder_confirmation(reminder)
+                        self.scheduler_agent.format_reminder_confirmation(reminders)
                     )
+                    
+                    # Serialize reminders list for confirmation
+                    reminders_json = [reminder.model_dump_json() for reminder in reminders]
                     
                     # Return response with confirmation data
                     return RouterResponse(
@@ -74,16 +77,24 @@ class IntentRouter:
                         needs_confirmation=True,
                         confirmation_data={
                             "type": "reminder",
-                            "reminder": reminder.model_dump_json(),
+                            "reminders": reminders_json,
                         },
                     )
 
-                # View reminders
+                # View reminders - show menu to select reminder
                 elif "schedule.reminder.view" in intents:
-                    reminders_message = await self.scheduler_agent.view_reminders(
+                    reminders = await self.scheduler_agent.database_service.get_user_reminders(
                         user_id, limit=5
                     )
-                    return RouterResponse(message=reminders_message)
+                    if not reminders:
+                        return RouterResponse(
+                            message="📋 У вас нет напоминаний."
+                        )
+                    return RouterResponse(
+                        message="📋 Выберите напоминание:",
+                        show_reminder_menu=True,
+                        confirmation_data={"action": "view"},
+                    )
 
                 # Edit reminder - show menu to select reminder
                 elif "schedule.reminder.edit" in intents:

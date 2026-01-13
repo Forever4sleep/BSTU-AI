@@ -9,7 +9,7 @@ to properly parse relative dates.
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from langchain.agents import create_agent
@@ -25,7 +25,7 @@ from config.openrouter import (
     get_openrouter_base_url,
     get_openrouter_model,
 )
-from shared.models.reminder import ReminderCreate
+from shared.models.reminder import ReminderCreate, ReminderCreateList
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +34,20 @@ GMT3 = timezone(timedelta(hours=3))
 
 REMINDER_EXTRACTION_SYSTEM_PROMPT = """Вы - агент для извлечения информации о напоминаниях в боте-помощнике студентов БГТУ.
 
-Ваша задача - извлечь из сообщения пользователя информацию о напоминании и вернуть её в формате JSON:
+Ваша задача - извлечь из сообщения пользователя информацию о напоминаниях и вернуть их в формате JSON.
+Сообщение может содержать одно или несколько напоминаний. Если пользователь просит создать несколько напоминаний,
+верните список всех напоминаний.
+
+Формат ответа:
 {{
-    "message": "Текст напоминания",
-    "reminder_date": "YYYY-MM-DDTHH:MM:SS+03:00",
-    "timezone": "GMT+3",
-    "recurring": "NOT SPECIFIED" | "daily" | "weekly" | "monthly"
+    "reminders": [
+        {{
+            "message": "Текст напоминания",
+            "reminder_date": "YYYY-MM-DDTHH:MM:SS+03:00",
+            "timezone": "GMT+3",
+            "recurring": "NOT SPECIFIED" | "daily" | "weekly" | "monthly"
+        }}
+    ]
 }}
 
 Правила:
@@ -47,6 +55,9 @@ REMINDER_EXTRACTION_SYSTEM_PROMPT = """Вы - агент для извлечен
 - recurring: "NOT SPECIFIED" если пользователь не указал периодичность
 - Если время не указано, используйте 9:00 утра
 - reminder_date должен быть в формате ISO с timezone: YYYY-MM-DDTHH:MM:SS+03:00
+- Если пользователь просит создать несколько напоминаний (например, "напомни мне в понедельник и вторник"),
+  верните список с несколькими элементами
+- Если пользователь просит создать одно напоминание, верните список с одним элементом
 """
 
 
@@ -86,11 +97,11 @@ class SchedulerAgent:
         tools = [get_current_date, calculate_date]
 
         # Create agent with structured output using ToolStrategy
-        # This ensures the agent always returns ReminderCreate schema
+        # This ensures the agent always returns ReminderCreateList schema (list of reminders)
         self.agent = create_agent(
             model=llm,
             tools=tools,
-            response_format=ToolStrategy(ReminderCreate),
+            response_format=ToolStrategy(ReminderCreateList),
         )
         self.system_prompt = REMINDER_EXTRACTION_SYSTEM_PROMPT
 
@@ -101,30 +112,31 @@ class SchedulerAgent:
 
     async def extract_reminder_info(
         self, user_message: str, user_id: int
-    ) -> ReminderCreate:
+    ) -> List[ReminderCreate]:
         """
         Extract reminder information from user message using agent.
 
         Args:
-            user_message: User's natural language message about creating a reminder
+            user_message: User's natural language message about creating reminders
             user_id: Telegram user ID
 
         Returns:
-            ReminderCreate object (NOT saved to database yet)
+            List of ReminderCreate objects (NOT saved to database yet)
 
         Raises:
             ValueError: If extraction fails or returns invalid data
         """
         try:
             user_prompt = (
-                f"Извлеките информацию о напоминании из следующего сообщения пользователя:\n\n"
+                f"Извлеките информацию о напоминаниях из следующего сообщения пользователя:\n\n"
                 f"{user_message}\n\n"
                 f"User ID: {user_id}\n\n"
-                f"Верните финальный ответ в формате JSON с полями: message, reminder_date, timezone, recurring."
+                f"Верните финальный ответ в формате JSON с полем reminders (список напоминаний). "
+                f"Каждое напоминание должно содержать поля: message, reminder_date, timezone, recurring."
             )
 
             logger.info("=" * 80)
-            logger.info("📅 REMINDER EXTRACTION REQUEST (ReAct Agent)")
+            logger.info("📅 REMINDER EXTRACTION REQUEST (Agent)")
             logger.info("=" * 80)
             logger.info(f"📝 User Message: {user_message}")
             logger.info(f"👤 User ID: {user_id}")
@@ -154,35 +166,39 @@ class SchedulerAgent:
                 )
             
             # Validate the result
-            if not isinstance(result_obj, ReminderCreate):
+            if not isinstance(result_obj, ReminderCreateList):
                 if isinstance(result_obj, dict):
-                    result_obj = ReminderCreate(**result_obj)
+                    result_obj = ReminderCreateList(**result_obj)
                 else:
                     raise ValueError(f"Unexpected result type: {type(result_obj)}")
             
-            # Ensure user_id is set correctly
-            result_obj.user_id = user_id
-
-            # Ensure timezone is GMT+3
-            result_obj.timezone = "GMT+3"
-
-            # Ensure timezone-aware datetime
-            if result_obj.reminder_date.tzinfo is None:
-                result_obj.reminder_date = result_obj.reminder_date.replace(tzinfo=GMT3)
+            # Extract reminders list
+            reminders = result_obj.reminders
+            
+            # Ensure user_id and timezone are set correctly for all reminders
+            for reminder in reminders:
+                reminder.user_id = user_id
+                reminder.timezone = "GMT+3"
+                
+                # Ensure timezone-aware datetime
+                if reminder.reminder_date.tzinfo is None:
+                    reminder.reminder_date = reminder.reminder_date.replace(tzinfo=GMT3)
 
             # Log structured output
             logger.info("-" * 80)
-            logger.info("📊 EXTRACTED REMINDER DATA:")
+            logger.info("📊 EXTRACTED REMINDERS DATA:")
             logger.info("-" * 80)
-            logger.info(f"  Message: {result_obj.message}")
-            logger.info(f"  Date: {result_obj.reminder_date}")
-            logger.info(f"  Timezone: {result_obj.timezone}")
-            logger.info(
-                f"  Recurring: {result_obj.recurring.value if result_obj.recurring else 'None'}"
-            )
+            logger.info(f"  Found {len(reminders)} reminder(s):")
+            for idx, reminder in enumerate(reminders, 1):
+                logger.info(f"  {idx}. Message: {reminder.message}")
+                logger.info(f"     Date: {reminder.reminder_date}")
+                logger.info(f"     Timezone: {reminder.timezone}")
+                logger.info(
+                    f"     Recurring: {reminder.recurring.value if reminder.recurring else 'None'}"
+                )
             logger.info("=" * 80)
 
-            return result_obj
+            return reminders
 
         except ValidationError as e:
             logger.error(f"Validation error in reminder extraction: {e}")
@@ -207,28 +223,59 @@ class SchedulerAgent:
         logger.info(f"Created reminder {reminder_id} in database")
         return reminder_id
 
-    def format_reminder_confirmation(
-        self, reminder: ReminderCreate
-    ) -> str:
+    async def create_reminders(
+        self, reminders: List[ReminderCreate]
+    ) -> List[UUID]:
         """
-        Format a confirmation message for the reminder (before saving).
+        Save multiple reminders to database.
 
         Args:
-            reminder: ReminderCreate object
+            reminders: List of ReminderCreate objects
+
+        Returns:
+            List of UUIDs of created reminders
+        """
+        reminder_ids = await self.database_service.create_reminders(reminders)
+        logger.info(f"Created {len(reminder_ids)} reminders in database")
+        return reminder_ids
+
+    def format_reminder_confirmation(
+        self, reminders: List[ReminderCreate]
+    ) -> str:
+        """
+        Format a confirmation message for the reminders (before saving).
+
+        Args:
+            reminders: List of ReminderCreate objects
 
         Returns:
             Formatted confirmation message
         """
-        date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
-        recurring_str = ""
-        if reminder.recurring and reminder.recurring.value != "NOT SPECIFIED":
-            recurring_str = f" (recurring: {reminder.recurring.value})"
+        if len(reminders) == 1:
+            reminder = reminders[0]
+            date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
+            recurring_str = ""
+            if reminder.recurring and reminder.recurring.value != "NOT SPECIFIED":
+                recurring_str = f" (повтор: {reminder.recurring.value})"
 
-        message = (
-            f"📝 Сообщение: {reminder.message}\n"
-            f"📅 Дата: {date_str} ({reminder.timezone}){recurring_str}\n\n"
-            f"Подтвердите создание напоминания:"
-        )
+            message = (
+                f"📝 Сообщение: {reminder.message}\n"
+                f"📅 Дата: {date_str} ({reminder.timezone}){recurring_str}\n\n"
+                f"Подтвердите создание напоминания:"
+            )
+        else:
+            message = f"📋 Создать {len(reminders)} напоминаний:\n\n"
+            for idx, reminder in enumerate(reminders, 1):
+                date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
+                recurring_str = ""
+                if reminder.recurring and reminder.recurring.value != "NOT SPECIFIED":
+                    recurring_str = f" (повтор: {reminder.recurring.value})"
+                
+                message += (
+                    f"{idx}. 📝 {reminder.message}\n"
+                    f"   📅 {date_str} ({reminder.timezone}){recurring_str}\n\n"
+                )
+            message += "Подтвердите создание напоминаний:"
 
         return message
 

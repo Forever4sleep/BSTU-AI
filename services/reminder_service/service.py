@@ -12,7 +12,7 @@ from typing import Optional
 from telegram import Bot
 from telegram.error import TelegramError
 
-from agents.scheduler.database import ReminderDatabaseService
+from services.reminder_service.database import ReminderDatabaseService
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ class ReminderService:
 
             # Send via Telegram
             await self.telegram_bot.send_message(
-                chat_id=reminder.user_id, text=message
+                chat_id=reminder.user_id, text=message, parse_mode="HTML"
             )
 
             logger.info(f"Sent reminder {reminder.id} to user {reminder.user_id}")

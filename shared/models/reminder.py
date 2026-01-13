@@ -6,7 +6,7 @@ Pydantic models for reminder structured output and data representation.
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -45,6 +45,20 @@ class ReminderCreate(BaseModel):
     recurring: RecurringPattern = Field(
         default=RecurringPattern.NOT_SPECIFIED,
         description="Recurring pattern for the reminder. Use 'NOT SPECIFIED' if user doesn't specify recurrence.",
+    )
+
+
+class ReminderCreateList(BaseModel):
+    """
+    Structured output model for creating multiple reminders from user messages.
+
+    This model is used with LLM structured output to extract multiple reminders
+    from natural language user input.
+    """
+
+    reminders: List[ReminderCreate] = Field(
+        description="List of reminders to create. Can contain one or more reminders.",
+        min_length=1,
     )
 
 

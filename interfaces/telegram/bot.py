@@ -22,7 +22,6 @@ from telegram.ext import (
 )
 
 from agents.scheduler import ReminderDatabaseService, SchedulerAgent
-from agents.scheduler.telegram import ReminderService
 from config.database import create_connection_pool, ensure_reminders_table
 from orchestrator import IntentClassifier, IntentRouter
 from orchestrator.router import RouterResponse
@@ -58,7 +57,6 @@ class TelegramBot:
         self.database_service: Optional[ReminderDatabaseService] = None
         self.scheduler_agent: Optional[SchedulerAgent] = None
         self.intent_router: Optional[IntentRouter] = None
-        self.reminder_service: Optional[ReminderService] = None
 
         # State management for reminder editing
         self.editing_reminders: dict[int, str] = {}  # user_id -> reminder_id
@@ -71,6 +69,7 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("start", self._handle_start))
         self.application.add_handler(CommandHandler("help", self._handle_help))
         self.application.add_handler(CommandHandler("menu", self._handle_menu))
+        self.application.add_handler(CommandHandler("reminders", self._handle_reminders))
 
         # Callback query handler for button clicks
         self.application.add_handler(CallbackQueryHandler(self._handle_button_click))
@@ -104,34 +103,78 @@ class TelegramBot:
             "• Учебными материалами и объяснениями\n"
             "• Академической информацией (преподаватели, курсы)\n"
             "• Расписанием и дедлайнами\n\n"
-            "Выберите раздел ниже или просто напишите вопрос!"
+            "Выберите раздел для получения подробной информации:"
         )
-        keyboard = self._get_main_menu_keyboard()
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔔 Уведомления", callback_data="faq_reminders")],
+            [InlineKeyboardButton("🤖 AI-репетитор", callback_data="faq_learning")],
+            [InlineKeyboardButton("📋 Главное меню", callback_data="main_menu")]
+        ])
         await update.message.reply_text(welcome_message, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
     async def _handle_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /menu command - show main menu."""
-        menu_message = "📋 Главное меню\n\nВыберите раздел:"
-        keyboard = self._get_main_menu_keyboard()
+        """Handle /menu command - show FAQ menu."""
+        menu_message = (
+            "❓ Помощь\n\n"
+            "Команды:\n"
+            "/start - Запустить бота\n"
+            "/menu - Показать главное меню\n"
+            "/help - Показать справку\n\n"
+            "Выберите раздел для получения подробной информации:"
+        )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔔 Уведомления", callback_data="faq_reminders")],
+            [InlineKeyboardButton("🤖 AI-репетитор", callback_data="faq_learning")],
+            [InlineKeyboardButton("📋 Главное меню", callback_data="main_menu")]
+        ])
         await update.message.reply_text(menu_message, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
     async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command."""
         help_message = (
-            "📚 Справка BSTU-AI\n\n"
+            "❓ Помощь\n\n"
             "Команды:\n"
             "/start - Запустить бота\n"
             "/menu - Показать главное меню\n"
-            "/help - Показать это сообщение справки\n\n"
-            "Вы можете спросить меня о:\n"
-            "• Учебных темах и объяснениях\n"
-            "• Информации о преподавателях\n"
-            "• Требованиях к курсам\n"
-            "• Расписании и дедлайнах\n\n"
-            "Используйте кнопки меню или просто напишите вопрос!"
+            "/help - Показать справку\n"
+            "/reminders - Показать ваши напоминания\n\n"
+            "Выберите раздел для получения подробной информации:"
         )
-        keyboard = self._get_main_menu_keyboard()
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔔 Уведомления", callback_data="faq_reminders")],
+            [InlineKeyboardButton("🤖 AI-репетитор", callback_data="faq_learning")],
+            [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")]
+        ])
         await update.message.reply_text(help_message, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+
+    async def _handle_reminders(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /reminders command - show user's reminders menu."""
+        user_id = update.effective_user.id
+        
+        if not self.database_service:
+            await update.message.reply_text(
+                "❌ Сервис базы данных недоступен. Попробуйте позже.",
+                parse_mode=ParseMode.HTML
+            )
+            return
+        
+        # Get user's reminders
+        reminders = await self.database_service.get_user_reminders(user_id, limit=5)
+        
+        if not reminders:
+            await update.message.reply_text(
+                "📋 У вас пока нет напоминаний.\n\n"
+                "Создайте напоминание, написав мне, например:\n"
+                "• \"Напомни мне завтра в 15:00 сдать курсовую\"\n"
+                "• \"Создай напоминание на понедельник в 8 утра про экзамен\"",
+                parse_mode=ParseMode.HTML
+            )
+            return
+        
+        # Show reminder selection menu (same as schedule.reminder.view intent)
+        await self._show_reminder_menu(
+            update, "📋 Выберите напоминание:", "view"
+        )
 
     async def _handle_button_click(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -198,10 +241,62 @@ class TelegramBot:
                 "/start - Запустить бота\n"
                 "/menu - Показать главное меню\n"
                 "/help - Показать справку\n\n"
-                "Вы можете использовать кнопки меню или просто написать вопрос естественным образом!"
+                "Выберите раздел для получения подробной информации:"
             )
             keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔔 Уведомления", callback_data="faq_reminders")],
+                [InlineKeyboardButton("🤖 AI-репетитор", callback_data="faq_learning")],
                 [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")]
+            ])
+            await query.edit_message_text(response, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+
+        elif callback_data == "faq_reminders":
+            response = (
+                "🔔 Уведомления\n\n"
+                "Я могу помочь вам управлять напоминаниями о важных событиях и дедлайнах.\n\n"
+                "<b>Создание напоминания:</b>\n"
+                "Просто напишите мне, например:\n"
+                "• \"Напомни мне завтра в 15:00 сдать курсовую\"\n"
+                "• \"Создай напоминание на понедельник в 8 утра про экзамен\"\n"
+                "• \"Напомни через час позвонить маме\"\n\n"
+                "<b>Просмотр напоминаний:</b>\n"
+                "Спросите \"Покажи мои напоминания\" или \"Какие у меня напоминания?\"\n\n"
+                "<b>Редактирование:</b>\n"
+                "Скажите \"Измени напоминание\" или \"Отредактируй напоминание\", "
+                "выберите нужное из списка и опишите, что хотите изменить.\n\n"
+                "<b>Удаление:</b>\n"
+                "Скажите \"Удали напоминание\" или \"Убери напоминание\", "
+                "выберите нужное из списка и подтвердите удаление.\n\n"
+                "<b>Повторяющиеся напоминания:</b>\n"
+                "Можно создать ежедневные, еженедельные или ежемесячные напоминания. "
+                "Просто укажите периодичность, например: \"Напоминай каждый день в 9 утра учиться\""
+            )
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Назад", callback_data="help")]
+            ])
+            await query.edit_message_text(response, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+
+        elif callback_data == "faq_learning":
+            response = (
+                "🤖 AI-репетитор\n\n"
+                "Я могу помочь вам изучать предметы быстрее, используя материалы, специфичные для БГТУ.\n\n"
+                "<b>Объяснение тем:</b>\n"
+                "Спросите меня о любой учебной теме, и я объясню её, используя материалы из вашего университета. "
+                "Например: \"Объясни квантовую физику\" или \"Что такое интегралы?\"\n\n"
+                "<b>Краткое изложение:</b>\n"
+                "Попросите меня сделать краткое изложение материала или темы. "
+                "Например: \"Сделай краткое изложение темы про электромагнетизм\"\n\n"
+                "<b>Тесты для проверки знаний:</b>\n"
+                "Я могу создать тест по любой теме, чтобы проверить ваши знания. "
+                "Просто скажите: \"Создай тест по математике\" или \"Проверь мои знания по физике\"\n\n"
+                "<b>Проверка ответов:</b>\n"
+                "Отправьте мне свои ответы на тест, и я проверю их, объяснив ошибки.\n\n"
+                "<b>План повторения:</b>\n"
+                "Я могу составить план повторения материала на основе ваших слабых мест. "
+                "Просто укажите, какие темы вызывают трудности."
+            )
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Назад", callback_data="help")]
             ])
             await query.edit_message_text(response, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
@@ -210,66 +305,27 @@ class TelegramBot:
             keyboard = self._get_main_menu_keyboard()
             await query.edit_message_text(response, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
-        elif callback_data == "confirm_reminder":
-            # Handle reminder confirmation
-            pending_data = context.user_data.get("pending_reminder")
-            if not pending_data or pending_data.get("type") != "reminder":
-                await query.answer("Ошибка: данные напоминания не найдены", show_alert=True)
-                return
-
+        elif callback_data.startswith("confirm_reminder_"):
+            # Handle individual reminder confirmation
+            # Format: confirm_reminder_<index>
             try:
-                # Parse reminder from JSON
-                reminder_json = pending_data.get("reminder")
-                reminder_dict = json.loads(reminder_json)
-                
-                # Parse datetime string to datetime object
-                if "reminder_date" in reminder_dict and isinstance(reminder_dict["reminder_date"], str):
-                    from datetime import datetime
-                    reminder_dict["reminder_date"] = datetime.fromisoformat(
-                        reminder_dict["reminder_date"].replace("Z", "+00:00")
-                    )
-                
-                reminder = ReminderCreate(**reminder_dict)
+                reminder_index = int(callback_data.replace("confirm_reminder_", ""))
+            except ValueError:
+                await query.answer("Ошибка: неверный формат данных", show_alert=True)
+                return
+            
+            await self._handle_individual_reminder_confirmation(query, context, reminder_index)
 
-                # Save to database
-                if self.scheduler_agent:
-                    reminder_id = await self.scheduler_agent.create_reminder(reminder)
-                    
-                    # Clear pending reminder
-                    context.user_data.pop("pending_reminder", None)
-                    
-                    # Format success message
-                    date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
-                    recurring_str = ""
-                    if reminder.recurring and reminder.recurring.value != "NOT SPECIFIED":
-                        recurring_str = f" (recurring: {reminder.recurring.value})"
-                    
-                    success_message = (
-                        f"✅ Напоминание создано!\n\n"
-                        f"📝 Сообщение: {reminder.message}\n"
-                        f"📅 Дата: {date_str} ({reminder.timezone}){recurring_str}"
-                    )
-                    
-                    await query.edit_message_text(success_message, parse_mode=ParseMode.HTML)
-                    await query.answer("Напоминание создано!")
-                else:
-                    await query.answer("Ошибка: агент не инициализирован", show_alert=True)
-            except Exception as e:
-                logger.error(f"Error confirming reminder: {e}", exc_info=True)
-                await query.answer("Ошибка при создании напоминания", show_alert=True)
-                await query.edit_message_text(
-                    "❌ Произошла ошибка при создании напоминания. Попробуйте еще раз.",
-                    parse_mode=ParseMode.HTML
-                )
-
-        elif callback_data == "cancel_reminder":
-            # Handle reminder cancellation
-            context.user_data.pop("pending_reminder", None)
-            await query.edit_message_text(
-                "❌ Создание напоминания отменено.",
-                parse_mode=ParseMode.HTML
-            )
-            await query.answer("Напоминание отменено")
+        elif callback_data.startswith("cancel_reminder_"):
+            # Handle individual reminder cancellation
+            # Format: cancel_reminder_<index>
+            try:
+                reminder_index = int(callback_data.replace("cancel_reminder_", ""))
+            except ValueError:
+                await query.answer("Ошибка: неверный формат данных", show_alert=True)
+                return
+            
+            await self._handle_individual_reminder_cancellation(query, context, reminder_index)
 
         elif callback_data.startswith("reminder_"):
             # Handle reminder selection: reminder_<reminder_id>_<action>
@@ -306,6 +362,139 @@ class TelegramBot:
                 parse_mode=ParseMode.HTML,
             )
             await query.answer("Операция отменена")
+
+    async def _handle_individual_reminder_confirmation(
+        self, query, context: ContextTypes.DEFAULT_TYPE, reminder_index: int
+    ):
+        """
+        Handle confirmation of a single reminder from a list.
+        
+        Args:
+            query: CallbackQuery object
+            context: Bot context
+            reminder_index: Index of the reminder in the pending list
+        """
+        pending_data = context.user_data.get("pending_reminder")
+        if not pending_data or pending_data.get("type") != "reminder":
+            await query.answer("Ошибка: данные напоминания не найдены", show_alert=True)
+            return
+
+        try:
+            # Parse reminders from JSON
+            reminders_json = pending_data.get("reminders", [])
+            if not reminders_json:
+                # Fallback to old format (single reminder)
+                reminder_json = pending_data.get("reminder")
+                if reminder_json:
+                    reminders_json = [reminder_json]
+                else:
+                    raise ValueError("No reminders found in pending data")
+
+            if reminder_index >= len(reminders_json):
+                await query.answer("Ошибка: неверный индекс напоминания", show_alert=True)
+                return
+
+            # Parse the specific reminder
+            reminder_json = reminders_json[reminder_index]
+            reminder_dict = json.loads(reminder_json) if isinstance(reminder_json, str) else reminder_json
+            
+            # Parse datetime string to datetime object
+            if "reminder_date" in reminder_dict and isinstance(reminder_dict["reminder_date"], str):
+                from datetime import datetime
+                reminder_dict["reminder_date"] = datetime.fromisoformat(
+                    reminder_dict["reminder_date"].replace("Z", "+00:00")
+                )
+            
+            reminder = ReminderCreate(**reminder_dict)
+
+            # Save to database
+            if self.scheduler_agent:
+                reminder_id = await self.scheduler_agent.create_reminder(reminder)
+                
+                # Mark this reminder as confirmed in user_data
+                confirmed_indices = context.user_data.get("confirmed_reminder_indices", set())
+                confirmed_indices.add(reminder_index)
+                context.user_data["confirmed_reminder_indices"] = confirmed_indices
+                
+                # Format success message
+                date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
+                recurring_str = ""
+                if reminder.recurring and reminder.recurring.value != "NOT SPECIFIED":
+                    recurring_str = f" (повтор: {reminder.recurring.value})"
+                
+                success_message = (
+                    f"✅ Напоминание создано!\n\n"
+                    f"📝 Сообщение: {reminder.message}\n"
+                    f"📅 Дата: {date_str} ({reminder.timezone}){recurring_str}\n"
+                    f"ID: <code>{reminder_id}</code>"
+                )
+                
+                await query.edit_message_text(success_message, parse_mode=ParseMode.HTML)
+                await query.answer("Напоминание создано!")
+                
+                # Check if all reminders have been processed
+                total_reminders = len(reminders_json)
+                cancelled_indices = context.user_data.get("cancelled_reminder_indices", set())
+                if len(confirmed_indices) + len(cancelled_indices) >= total_reminders:
+                    # All reminders processed, clean up
+                    context.user_data.pop("pending_reminder", None)
+                    context.user_data.pop("confirmed_reminder_indices", None)
+                    context.user_data.pop("cancelled_reminder_indices", None)
+            else:
+                await query.answer("Ошибка: агент не инициализирован", show_alert=True)
+        except Exception as e:
+            logger.error(f"Error confirming reminder: {e}", exc_info=True)
+            await query.answer("Ошибка при создании напоминания", show_alert=True)
+            await query.edit_message_text(
+                "❌ Произошла ошибка при создании напоминания. Попробуйте еще раз.",
+                parse_mode=ParseMode.HTML
+            )
+
+    async def _handle_individual_reminder_cancellation(
+        self, query, context: ContextTypes.DEFAULT_TYPE, reminder_index: int
+    ):
+        """
+        Handle cancellation of a single reminder from a list.
+        
+        Args:
+            query: CallbackQuery object
+            context: Bot context
+            reminder_index: Index of the reminder in the pending list
+        """
+        pending_data = context.user_data.get("pending_reminder")
+        if not pending_data or pending_data.get("type") != "reminder":
+            await query.answer("Ошибка: данные напоминания не найдены", show_alert=True)
+            return
+
+        try:
+            # Mark this reminder as cancelled
+            cancelled_indices = context.user_data.get("cancelled_reminder_indices", set())
+            cancelled_indices.add(reminder_index)
+            context.user_data["cancelled_reminder_indices"] = cancelled_indices
+            
+            await query.edit_message_text(
+                "❌ Создание напоминания отменено.",
+                parse_mode=ParseMode.HTML
+            )
+            await query.answer("Напоминание отменено")
+            
+            # Check if all reminders have been processed
+            reminders_json = pending_data.get("reminders", [])
+            if not reminders_json:
+                reminder_json = pending_data.get("reminder")
+                if reminder_json:
+                    reminders_json = [reminder_json]
+            
+            total_reminders = len(reminders_json)
+            confirmed_indices = context.user_data.get("confirmed_reminder_indices", set())
+            if len(confirmed_indices) + len(cancelled_indices) >= total_reminders:
+                # All reminders processed, clean up
+                context.user_data.pop("pending_reminder", None)
+                context.user_data.pop("confirmed_reminder_indices", None)
+                context.user_data.pop("cancelled_reminder_indices", None)
+        except Exception as e:
+            logger.error(f"Error cancelling reminder: {e}", exc_info=True)
+            await query.answer("Ошибка при отмене напоминания", show_alert=True)
 
     async def _handle_message(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -345,22 +534,37 @@ class TelegramBot:
                             update, router_response.message, router_response.confirmation_data.get("action")
                         )
                     elif router_response.needs_confirmation:
-                        # Store pending reminder in user_data for confirmation
-                        context.user_data["pending_reminder"] = router_response.confirmation_data
+                        # Store pending reminders in user_data for confirmation
+                        confirmation_data = router_response.confirmation_data
+                        context.user_data["pending_reminder"] = confirmation_data
                         
-                        # Create confirmation keyboard
-                        keyboard = InlineKeyboardMarkup([
-                            [
-                                InlineKeyboardButton("✅ Да", callback_data="confirm_reminder"),
-                                InlineKeyboardButton("❌ Нет", callback_data="cancel_reminder"),
-                            ]
-                        ])
+                        # Check if we have multiple reminders
+                        reminders_json = confirmation_data.get("reminders", [])
+                        if not reminders_json:
+                            # Fallback to old format (single reminder)
+                            reminder_json = confirmation_data.get("reminder")
+                            if reminder_json:
+                                reminders_json = [reminder_json]
                         
-                        await update.message.reply_text(
-                            router_response.message,
-                            reply_markup=keyboard,
-                            parse_mode=ParseMode.HTML
-                        )
+                        if len(reminders_json) > 1:
+                            # Multiple reminders: send separate confirmation messages for each
+                            await self._send_multiple_reminder_confirmations(
+                                update, reminders_json, context
+                            )
+                        else:
+                            # Single reminder: use existing flow
+                            keyboard = InlineKeyboardMarkup([
+                                [
+                                    InlineKeyboardButton("✅ Да", callback_data="confirm_reminder_0"),
+                                    InlineKeyboardButton("❌ Нет", callback_data="cancel_reminder_0"),
+                                ]
+                            ])
+                            
+                            await update.message.reply_text(
+                                router_response.message,
+                                reply_markup=keyboard,
+                                parse_mode=ParseMode.HTML
+                            )
                     else:
                         await update.message.reply_text(
                             router_response.message,
@@ -449,14 +653,6 @@ class TelegramBot:
         # Initialize intent router
         self.intent_router = IntentRouter(scheduler_agent=self.scheduler_agent)
 
-        # Initialize reminder service
-        bot_instance = Bot(token=self.token)
-        self.reminder_service = ReminderService(
-            database_service=self.database_service,
-            telegram_bot=bot_instance,
-            poll_interval=60,  # Poll every 60 seconds
-        )
-
         logger.info("Initialized all services")
 
     async def _show_reminder_menu(
@@ -538,6 +734,66 @@ class TelegramBot:
             logger.error(f"Error handling reminder action: {e}", exc_info=True)
             await query.answer("Ошибка при обработке запроса", show_alert=True)
 
+    async def _send_multiple_reminder_confirmations(
+        self, update: Update, reminders_json: list, context: ContextTypes.DEFAULT_TYPE
+    ):
+        """
+        Send separate confirmation messages for each reminder.
+        
+        Args:
+            update: Update object
+            reminders_json: List of reminder JSON strings
+            context: Bot context
+        """
+        from datetime import datetime
+        from shared.models.reminder import ReminderCreate
+        
+        try:
+            # Parse all reminders
+            reminders = []
+            for reminder_json in reminders_json:
+                reminder_dict = json.loads(reminder_json) if isinstance(reminder_json, str) else reminder_json
+                
+                # Parse datetime string to datetime object
+                if "reminder_date" in reminder_dict and isinstance(reminder_dict["reminder_date"], str):
+                    reminder_dict["reminder_date"] = datetime.fromisoformat(
+                        reminder_dict["reminder_date"].replace("Z", "+00:00")
+                    )
+                
+                reminders.append(ReminderCreate(**reminder_dict))
+            
+            # Send a separate confirmation message for each reminder
+            for idx, reminder in enumerate(reminders):
+                date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
+                recurring_str = ""
+                if reminder.recurring and reminder.recurring.value != "NOT SPECIFIED":
+                    recurring_str = f" (повтор: {reminder.recurring.value})"
+                
+                confirmation_message = (
+                    f"📝 Сообщение: {reminder.message}\n"
+                    f"📅 Дата: {date_str} ({reminder.timezone}){recurring_str}\n\n"
+                    f"Подтвердите создание напоминания:"
+                )
+                
+                keyboard = InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("✅ Да", callback_data=f"confirm_reminder_{idx}"),
+                        InlineKeyboardButton("❌ Нет", callback_data=f"cancel_reminder_{idx}"),
+                    ]
+                ])
+                
+                await update.message.reply_text(
+                    confirmation_message,
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML
+                )
+        except Exception as e:
+            logger.error(f"Error sending multiple reminder confirmations: {e}", exc_info=True)
+            await update.message.reply_text(
+                "❌ Произошла ошибка при подготовке подтверждений. Попробуйте еще раз.",
+                parse_mode=ParseMode.HTML
+            )
+
     async def _handle_reminder_edit_text(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE, reminder_id: str, user_message: str
     ):
@@ -548,10 +804,20 @@ class TelegramBot:
 
         try:
             reminder_uuid = UUID(reminder_id)
-            # Extract edit information using agent
-            reminder = await self.scheduler_agent.extract_reminder_info(
+            # Extract edit information using agent (returns list, take first)
+            reminders = await self.scheduler_agent.extract_reminder_info(
                 user_message, user_id
             )
+            
+            if not reminders:
+                await update.message.reply_text(
+                    "❌ Не удалось извлечь информацию для редактирования.",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+            
+            # Use first reminder for editing (editing multiple reminders at once is not supported)
+            reminder = reminders[0]
 
             # Update reminder in database
             updated = await self.database_service.update_reminder(
@@ -666,10 +932,6 @@ class TelegramBot:
         # Initialize services
         await self._initialize_services()
 
-        # Start reminder service
-        if self.reminder_service:
-            await self.reminder_service.start()
-
         # Start bot
         await self.application.initialize()
         await self.application.start()
@@ -679,10 +941,6 @@ class TelegramBot:
     async def stop(self):
         """Stop the bot and all services."""
         logger.info("Stopping Telegram bot...")
-
-        # Stop reminder service
-        if self.reminder_service:
-            await self.reminder_service.stop()
 
         # Stop bot
         await self.application.updater.stop()

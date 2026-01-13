@@ -69,6 +69,54 @@ class ReminderDatabaseService:
             logger.error(f"Failed to create reminder: {e}")
             raise
 
+    async def create_reminders(self, reminders: List[ReminderCreate]) -> List[UUID]:
+        """
+        Create multiple reminders in the database in a single transaction.
+
+        Args:
+            reminders: List of ReminderCreate models with reminder data
+
+        Returns:
+            List of UUIDs of the created reminders
+
+        Raises:
+            asyncpg.exceptions.PostgresError: If database operation fails
+        """
+        query = """
+        INSERT INTO reminders (
+            user_id, message, reminder_date, timezone,
+            recurring_pattern
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+        """
+
+        try:
+            reminder_ids = []
+            async with self.pool.acquire() as conn:
+                async with conn.transaction():
+                    for reminder in reminders:
+                        reminder_id = await conn.fetchval(
+                            query,
+                            reminder.user_id,
+                            reminder.message,
+                            reminder.reminder_date,
+                            reminder.timezone or "GMT+3",
+                            reminder.recurring.value if reminder.recurring else "NOT SPECIFIED",
+                        )
+                        reminder_ids.append(reminder_id)
+                        logger.info(
+                            f"Created reminder {reminder_id} for user {reminder.user_id} "
+                            f"at {reminder.reminder_date}"
+                        )
+            logger.info(
+                f"Created {len(reminder_ids)} reminders for user {reminders[0].user_id if reminders else 'unknown'}"
+            )
+            return reminder_ids
+        except Exception as e:
+            logger.error(f"Failed to create reminders: {e}")
+            raise
+
     async def get_due_reminders(self, limit: int = 100) -> List[ReminderRecord]:
         """
         Get all reminders that are due (reminder_date <= now() and sent = false).
