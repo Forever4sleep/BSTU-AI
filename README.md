@@ -1,5 +1,7 @@
 # BSTU-AI
 
+A multi-agent AI system designed to help students automate academic tasks, accelerate learning, and enhance productivity.
+
 ## Purpose 
 
 BSTU-AI is a diploma project which introduces a multi-agent system that helps students automate certain activities, learn stuff quicker and be overall more productive. 
