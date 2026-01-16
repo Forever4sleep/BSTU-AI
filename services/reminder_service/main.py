@@ -27,7 +27,7 @@ from config.database import create_connection_pool, ensure_reminders_table
 from services.reminder_service.config import (
     get_database_url,
     get_poll_interval,
-    get_telegram_token,
+    get_telegram_token, 
 )
 from services.reminder_service.database import ReminderDatabaseService
 from services.reminder_service.service import ReminderService

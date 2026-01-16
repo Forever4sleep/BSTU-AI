@@ -81,3 +81,73 @@ The system recognizes various intents that are routed to the appropriate agents.
 ## Project Status
 
 This project is currently under active development. The intent list and functionality are continuously being expanded and refined.
+
+---
+
+## Development Roadmap
+
+### Core Agent Implementation
+
+#### Learning Agent
+- [ ] Implement Learning Agent core functionality (RAG-based explanations and summaries)
+- [ ] Set up Qdrant vector database configuration and connection
+- [ ] Implement RAG pipeline for Learning Agent (document loading, chunking, embedding, indexing)
+- [ ] Implement quiz generation functionality for Learning Agent (`learning.quiz.generate` intent)
+- [ ] Implement quiz grading functionality for Learning Agent (`learning.quiz.grade` intent)
+- [ ] Implement revision planning functionality for Learning Agent (`learning.plan.revision` intent)
+
+#### Academic Agent
+- [ ] Implement Academic Agent core functionality (professor profiles and course requirements)
+- [ ] Create database schema and models for academic data (professors, courses, requirements)
+- [ ] Implement professor profile retrieval (`academic.professor.profile` intent)
+- [ ] Implement course requirements retrieval (`academic.course.requirements` intent)
+
+#### Scheduler Agent
+- [x] Implement reminder creation (`schedule.reminder.create` intent)
+- [x] Implement reminder editing (`schedule.reminder.edit` intent)
+- [x] Implement reminder deletion (`schedule.reminder.delete` intent)
+- [x] Implement reminder viewing (`schedule.reminder.view` intent)
+- [ ] Complete Scheduler Agent: implement `schedule.lookup` and `schedule.deadline.lookup` intents
+
+### Infrastructure & Configuration
+
+- [ ] Add missing dependencies to requirements.txt (qdrant-client, langgraph, embeddings library, etc.)
+- [ ] Add configuration management for Qdrant connection (host, port, collection name)
+- [ ] Add environment variable validation and startup checks
+
+### Integration & Routing
+
+- [ ] Update IntentRouter to route Learning Agent intents (`learning.explain`, `learning.summarize`, etc.)
+- [ ] Update IntentRouter to route Academic Agent intents (`academic.professor.profile`, `academic.course.requirements`)
+
+### Interfaces
+
+- [ ] Implement Open WebUI interface (`interfaces/webui/`)
+
+### Data & Processing
+
+- [ ] Create data ingestion pipeline for loading BSTU materials into RAG system
+- [ ] Implement document processing utilities (PDF, DOCX, TXT parsers) for RAG
+
+### Testing
+
+- [ ] Create unit tests for IntentClassifier
+- [ ] Create unit tests for IntentRouter
+- [ ] Create unit tests for Scheduler Agent
+- [ ] Create unit tests for Learning Agent
+- [ ] Create unit tests for Academic Agent
+- [ ] Create integration tests for end-to-end workflows
+
+### Quality & Operations
+
+- [ ] Add error handling and logging improvements across all agents
+- [ ] Create shared utilities module (`shared/utils/`) with common helper functions
+- [ ] Add API rate limiting and error recovery mechanisms
+- [ ] Implement conversation context/memory for multi-turn interactions
+- [ ] Create deployment documentation and setup instructions
+
+---
+
+**Legend:**
+- [x] Completed
+- [ ] Pending
