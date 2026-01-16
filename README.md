@@ -1,6 +1,6 @@
 # BSTU-AI
 
-A multi-agent AI system designed to help students automate academic tasks, accelerate learning, and enhance productivity at Belarusian State Technical University (BSTU).
+A multi-agent AI system designed to help students automate academic tasks, accelerate learning, and enhance productivity.
 
 ---
 
