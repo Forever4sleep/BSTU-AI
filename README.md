@@ -84,6 +84,32 @@ This project is currently under active development. The intent list and function
 
 ---
 
+## Running with Docker Compose
+
+Run the entire system (PostgreSQL, Qdrant, main bot, reminder service, ingestion service, upload bot) with one command:
+
+```bash
+cp .env.example .env
+# Edit .env and set your API keys and bot tokens
+docker compose up --build
+```
+
+Services:
+- **telegram-bot** – Main student-facing bot
+- **reminder-service** – Polls for due reminders, sends via Telegram
+- **ingestion-service** – FastAPI at http://localhost:8001 for document upload
+- **upload-bot** – Admin bot for uploading documents to RAG
+- **postgres** – PostgreSQL on port 5432
+- **qdrant** – Vector DB on port 6333
+
+**Web UIs:**
+- **Qdrant dashboard** – http://localhost:6333/dashboard
+- **FastAPI Swagger UI** – http://localhost:8001/docs
+
+Postgres defaults: `postgresql://bstu:bstu@postgres:5432/bstu_ai` (overridden in compose).
+
+---
+
 ## Development Roadmap
 
 ### Core Agent Implementation

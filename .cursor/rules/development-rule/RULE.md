@@ -10,5 +10,4 @@ Must be in Russian.
 
 # Being Natural
 
-When constructing responses in Russian, adhere to simple, native-like speech without complicated 
-structures.sss
+When constructing responses in Russian, adhere to simple, native-like speech without complicated structures

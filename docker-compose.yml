@@ -1,0 +1,76 @@
+# Web UIs (when running: docker compose up --build)
+# - Qdrant dashboard: http://localhost:6333/dashboard
+# - FastAPI Swagger:  http://localhost:8001/docs
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bstu
+      POSTGRES_PASSWORD: bstu
+      POSTGRES_DB: bstu_ai
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bstu -d bstu_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  telegram-bot:
+    build: .
+    command: python run_telegram_bot.py
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://bstu:bstu@postgres:5432/bstu_ai
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  reminder-service:
+    build: .
+    command: python -m services.reminder_service.main
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://bstu:bstu@postgres:5432/bstu_ai
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ingestion-service:
+    build: .
+    command: uvicorn services.ingestion_service.main:app --host 0.0.0.0 --port 8001
+    env_file: .env
+    environment:
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+    ports:
+      - "8001:8001"
+    depends_on:
+      - qdrant
+    # restart: on-failure
+    # Reserve memory to reduce OOM risk during embedding of large documents
+    mem_limit: 2g
+
+  upload-bot:
+    build: .
+    command: python -m services.upload_bot.main
+    env_file: .env
+    environment:
+      INGESTION_SERVICE_URL: http://ingestion-service:8001
+    depends_on:
+      ingestion-service:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  qdrant_data:

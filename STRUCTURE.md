@@ -6,6 +6,10 @@ This document outlines the folder structure of the BSTU-AI project.
 
 ```
 BSTU-AI/
+├── services/              # Standalone microservices
+│   ├── reminder_service/  # Polls DB for due reminders, sends via Telegram
+│   ├── ingestion_service/ # FastAPI: document upload, processing, Qdrant indexing
+│   └── upload_bot/        # Telegram bot for admin document uploads to Ingestion Service
 ├── orchestrator/          # Intent extraction and routing
 ├── agents/                # Specialized agents
 │   ├── learning/         # Learning Agent (RAG-based)
@@ -32,6 +36,12 @@ BSTU-AI/
 ```
 
 ## Directory Descriptions
+
+### `services/`
+Standalone microservices, each deployable independently:
+- **`reminder_service/`**: Polls PostgreSQL for due reminders and sends them via Telegram
+- **`ingestion_service/`**: FastAPI app for document upload, parsing, chunking, embedding, and indexing into Qdrant
+- **`upload_bot/`**: Telegram bot (separate token) for admins to upload documents; forwards files to Ingestion Service API
 
 ### `orchestrator/`
 Central component that extracts user intents and routes requests to appropriate agents.
