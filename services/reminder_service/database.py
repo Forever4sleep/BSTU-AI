@@ -8,7 +8,7 @@ to make the reminder service independent.
 
 import logging
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 from uuid import UUID
@@ -36,6 +36,44 @@ class ReminderDatabaseService:
         """
         self.pool = pool
 
+    async def get_all_reminders_for_logging(self, limit: int = 100) -> List[ReminderRecord]:
+        """
+        Get all reminders (sent and unsent) for logging. Ordered by reminder_date.
+
+        Args:
+            limit: Maximum number to return
+
+        Returns:
+            List of ReminderRecord objects
+        """
+        query = """
+        SELECT id, user_id, message, reminder_date, timezone,
+               recurring_pattern, sent, created_at, updated_at
+        FROM reminders
+        ORDER BY reminder_date ASC
+        LIMIT $1
+        """
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(query, limit)
+                return [
+                    ReminderRecord(
+                        id=row["id"],
+                        user_id=row["user_id"],
+                        message=row["message"],
+                        reminder_date=row["reminder_date"],
+                        timezone=row["timezone"],
+                        recurring_pattern=row["recurring_pattern"],
+                        sent=row["sent"],
+                        created_at=row["created_at"],
+                        updated_at=row["updated_at"],
+                    )
+                    for row in rows
+                ]
+        except Exception as e:
+            logger.error("Failed to get reminders for logging: %s", e)
+            return []
+
     async def get_due_reminders(self, limit: int = 100) -> List[ReminderRecord]:
         """
         Get all reminders that are due (reminder_date <= now() and sent = false).
@@ -49,11 +87,14 @@ class ReminderDatabaseService:
         Raises:
             asyncpg.exceptions.PostgresError: If database operation fails
         """
+        # reminder_date is stored as timestamptz (UTC). Compare directly with NOW().
+        # The previous "NOW() AT TIME ZONE timezone" was incorrect: it mixed types
+        # and "GMT+3" may not be a valid PostgreSQL timezone name.
         query = """
         SELECT id, user_id, message, reminder_date, timezone,
                recurring_pattern, sent, created_at, updated_at
         FROM reminders
-        WHERE reminder_date <= NOW() AT TIME ZONE timezone
+        WHERE reminder_date <= NOW()
           AND sent = FALSE
         ORDER BY reminder_date ASC
         LIMIT $1
@@ -61,6 +102,17 @@ class ReminderDatabaseService:
 
         try:
             async with self.pool.acquire() as conn:
+                # Log current DB time for debugging timezone issues
+                db_now = await conn.fetchval("SELECT NOW()")
+                total_unsent = await conn.fetchval(
+                    "SELECT COUNT(*) FROM reminders WHERE sent = FALSE"
+                )
+                logger.debug(
+                    "get_due_reminders: db NOW()=%s, total unsent reminders=%s",
+                    db_now,
+                    total_unsent,
+                )
+
                 rows = await conn.fetch(query, limit)
                 reminders = [
                     ReminderRecord(
@@ -76,8 +128,19 @@ class ReminderDatabaseService:
                     )
                     for row in rows
                 ]
+
                 if reminders:
-                    logger.info(f"Found {len(reminders)} due reminders")
+                    logger.info(
+                        "Found %d due reminder(s): %s",
+                        len(reminders),
+                        [(str(r.id), r.user_id, r.reminder_date) for r in reminders],
+                    )
+                else:
+                    logger.info(
+                        "No due reminders (db NOW=%s, unsent in DB=%s)",
+                        db_now,
+                        total_unsent,
+                    )
                 return reminders
         except Exception as e:
             logger.error(f"Failed to get due reminders: {e}")
@@ -101,8 +164,8 @@ class ReminderDatabaseService:
 
         try:
             async with self.pool.acquire() as conn:
-                await conn.execute(query, reminder_id)
-                logger.debug(f"Marked reminder {reminder_id} as sent")
+                result = await conn.execute(query, reminder_id)
+                logger.info("Marked reminder %s as sent (result=%s)", reminder_id, result)
         except Exception as e:
             logger.error(f"Failed to mark reminder {reminder_id} as sent: {e}")
             raise
@@ -123,7 +186,12 @@ class ReminderDatabaseService:
             return None
 
         pattern = reminder.recurring_pattern.lower()
+        # Ensure we work in UTC: reminder_date from DB may be naive or in session TZ
         current_date = reminder.reminder_date
+        if current_date.tzinfo is None:
+            current_date = current_date.replace(tzinfo=timezone.utc)
+        else:
+            current_date = current_date.astimezone(timezone.utc)
 
         if pattern == "daily":
             return current_date + timedelta(days=1)
@@ -132,6 +200,17 @@ class ReminderDatabaseService:
         elif pattern == "monthly":
             # Add approximately one month (30 days)
             return current_date + timedelta(days=30)
+        elif pattern.startswith("minutes:"):
+            try:
+                n = int(pattern.split(":")[1])
+                if n > 0:
+                    return current_date + timedelta(minutes=n)
+            except (ValueError, IndexError):
+                pass
+            logger.warning(
+                "Invalid minutes pattern: %s", reminder.recurring_pattern
+            )
+            return None
         else:
             logger.warning(
                 f"Unknown recurring pattern: {reminder.recurring_pattern}"

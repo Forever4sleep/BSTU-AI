@@ -5,7 +5,7 @@ Handles all database operations for reminders.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
 
@@ -58,7 +58,7 @@ class ReminderDatabaseService:
                     reminder.message,
                     reminder.reminder_date,
                     reminder.timezone or "GMT+3",
-                    reminder.recurring.value if reminder.recurring else "NOT SPECIFIED",
+                    reminder.get_recurring_pattern_for_db(),
                 )
                 logger.info(
                     f"Created reminder {reminder_id} for user {reminder.user_id} "
@@ -102,7 +102,7 @@ class ReminderDatabaseService:
                             reminder.message,
                             reminder.reminder_date,
                             reminder.timezone or "GMT+3",
-                            reminder.recurring.value if reminder.recurring else "NOT SPECIFIED",
+                            reminder.get_recurring_pattern_for_db(),
                         )
                         reminder_ids.append(reminder_id)
                         logger.info(
@@ -130,11 +130,12 @@ class ReminderDatabaseService:
         Raises:
             asyncpg.exceptions.PostgresError: If database operation fails
         """
+        # reminder_date is timestamptz (UTC). Compare directly with NOW().
         query = """
         SELECT id, user_id, message, reminder_date, timezone,
                recurring_pattern, sent, created_at, updated_at
         FROM reminders
-        WHERE reminder_date <= NOW() AT TIME ZONE timezone
+        WHERE reminder_date <= NOW()
           AND sent = FALSE
         ORDER BY reminder_date ASC
         LIMIT $1
@@ -272,7 +273,12 @@ class ReminderDatabaseService:
             return None
 
         pattern = reminder.recurring_pattern.lower()
+        # Ensure we work in UTC for consistent calculation
         current_date = reminder.reminder_date
+        if current_date.tzinfo is None:
+            current_date = current_date.replace(tzinfo=timezone.utc)
+        else:
+            current_date = current_date.astimezone(timezone.utc)
 
         if pattern == "daily":
             return current_date + timedelta(days=1)
@@ -281,6 +287,17 @@ class ReminderDatabaseService:
         elif pattern == "monthly":
             # Add approximately one month (30 days)
             return current_date + timedelta(days=30)
+        elif pattern.startswith("minutes:"):
+            try:
+                n = int(pattern.split(":")[1])
+                if n > 0:
+                    return current_date + timedelta(minutes=n)
+            except (ValueError, IndexError):
+                pass
+            logger.warning(
+                "Invalid minutes pattern: %s", reminder.recurring_pattern
+            )
+            return None
         else:
             logger.warning(
                 f"Unknown recurring pattern: {reminder.recurring_pattern}"

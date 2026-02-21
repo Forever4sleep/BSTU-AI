@@ -4,7 +4,7 @@ Reminder Models
 Pydantic models for reminder structured output and data representation.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import List, Optional
 from uuid import UUID
@@ -19,6 +19,7 @@ class RecurringPattern(str, Enum):
     DAILY = "daily"
     WEEKLY = "weekly"
     MONTHLY = "monthly"
+    EVERY_MINUTES = "minutes"  # Use with recurring_interval_minutes
 
 
 class ReminderCreate(BaseModel):
@@ -46,6 +47,26 @@ class ReminderCreate(BaseModel):
         default=RecurringPattern.NOT_SPECIFIED,
         description="Recurring pattern for the reminder. Use 'NOT SPECIFIED' if user doesn't specify recurrence.",
     )
+    recurring_interval_minutes: Optional[int] = Field(
+        default=None,
+        description="For recurring='minutes' only: interval in minutes (e.g. 5, 15, 30). Required when recurring is 'minutes'.",
+    )
+
+    def get_recurring_pattern_for_db(self) -> str:
+        """Return the recurring_pattern string for database storage."""
+        if self.recurring == RecurringPattern.EVERY_MINUTES:
+            n = self.recurring_interval_minutes or 15
+            return f"minutes:{n}"
+        return self.recurring.value
+
+    def get_recurring_display_str(self) -> str:
+        """Return human-readable recurring string for display."""
+        if self.recurring == RecurringPattern.EVERY_MINUTES:
+            n = self.recurring_interval_minutes or 15
+            return f"каждые {n} мин"
+        if self.recurring and self.recurring != RecurringPattern.NOT_SPECIFIED:
+            return self.recurring.value
+        return ""
 
 
 class ReminderCreateList(BaseModel):
@@ -60,6 +81,46 @@ class ReminderCreateList(BaseModel):
         description="List of reminders to create. Can contain one or more reminders.",
         min_length=1,
     )
+
+
+def format_reminder_date_for_display(dt: datetime, tz_str: str = "GMT+3") -> str:
+    """Convert reminder_date (stored in UTC) to user's timezone for display."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    offset_hours = 3
+    if tz_str:
+        tz_upper = tz_str.upper()
+        if "+" in tz_upper:
+            try:
+                part = tz_upper.split("+")[1].strip().split(":")[0]
+                offset_hours = int(part) if part else 3
+            except (ValueError, IndexError):
+                pass
+        elif "-" in tz_upper and ("GMT" in tz_upper or "UTC" in tz_upper):
+            try:
+                part = tz_upper.split("-")[1].strip().split(":")[0]
+                offset_hours = -int(part) if part else -3
+            except (ValueError, IndexError):
+                pass
+    user_tz = timezone(timedelta(hours=offset_hours))
+    local = dt.astimezone(user_tz)
+    return local.strftime("%Y-%m-%d %H:%M")
+
+
+def format_recurring_pattern_display(pattern: Optional[str]) -> str:
+    """Format recurring_pattern string for human-readable display."""
+    if not pattern or pattern.upper() == "NOT SPECIFIED":
+        return ""
+    p = pattern.lower()
+    if p.startswith("minutes:"):
+        try:
+            n = int(p.split(":")[1])
+            return f"каждые {n} мин"
+        except (ValueError, IndexError):
+            return pattern
+    return pattern
 
 
 class ReminderRecord(BaseModel):

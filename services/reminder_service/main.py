@@ -26,18 +26,22 @@ sys.path.insert(0, str(project_root))
 from config.database import create_connection_pool, ensure_reminders_table
 from services.reminder_service.config import (
     get_database_url,
+    get_log_level,
     get_poll_interval,
-    get_telegram_token, 
+    get_telegram_token,
 )
 from services.reminder_service.database import ReminderDatabaseService
 from services.reminder_service.service import ReminderService
 
-# Configure logging
+# Configure logging (level from REMINDER_LOG_LEVEL env, default INFO)
+_log_level_name = get_log_level()
+_log_level = getattr(logging, _log_level_name, logging.INFO)
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
+    level=_log_level,
 )
 logger = logging.getLogger(__name__)
+logger.info("Reminder service logging level: %s", _log_level_name)
 
 
 class ReminderServiceApp:
@@ -57,7 +61,11 @@ class ReminderServiceApp:
             telegram_token = get_telegram_token()
             poll_interval = get_poll_interval()
 
-            logger.info("Initializing reminder service...")
+            logger.info(
+                "Initializing reminder service (poll_interval=%ds, db=%s)",
+                poll_interval,
+                database_url.split("@")[-1] if "@" in database_url else "***",
+            )
 
             # Create database connection pool
             logger.info("Connecting to database...")
@@ -71,6 +79,8 @@ class ReminderServiceApp:
 
             # Initialize Telegram bot
             telegram_bot = Bot(token=telegram_token)
+            bot_info = await telegram_bot.get_me()
+            logger.info("Telegram bot connected: @%s (id=%s)", bot_info.username, bot_info.id)
 
             # Initialize reminder service
             self.reminder_service = ReminderService(
@@ -90,7 +100,7 @@ class ReminderServiceApp:
         if not self.reminder_service:
             raise RuntimeError("Service not initialized. Call initialize() first.")
 
-        logger.info("Starting reminder service...")
+        logger.info("Starting reminder service (poll loop will run every %ds)...", self.reminder_service.poll_interval)
         await self.reminder_service.start()
 
     async def stop(self) -> None:

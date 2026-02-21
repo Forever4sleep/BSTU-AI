@@ -26,7 +26,7 @@ from config.database import create_connection_pool, ensure_reminders_table
 from orchestrator import IntentClassifier, IntentRouter
 from orchestrator.router import RouterResponse
 from shared.intents.schemas import IntentClassification
-from shared.models.reminder import ReminderCreate
+from shared.models.reminder import ReminderCreate, format_reminder_date_for_display
 
 logger = logging.getLogger(__name__)
 
@@ -420,7 +420,7 @@ class TelegramBot:
                 date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
                 recurring_str = ""
                 if reminder.recurring and reminder.recurring.value != "NOT SPECIFIED":
-                    recurring_str = f" (повтор: {reminder.recurring.value})"
+                    recurring_str = f" (повтор: {reminder.get_recurring_display_str()})"
                 
                 success_message = (
                     f"✅ Напоминание создано!\n\n"
@@ -670,7 +670,9 @@ class TelegramBot:
 
         keyboard = []
         for reminder in reminders:
-            date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
+            date_str = format_reminder_date_for_display(
+                reminder.reminder_date, reminder.timezone
+            )
             button_text = f"{reminder.message[:30]}... ({date_str})"
             if len(reminder.message) <= 30:
                 button_text = f"{reminder.message} ({date_str})"
@@ -767,7 +769,7 @@ class TelegramBot:
                 date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
                 recurring_str = ""
                 if reminder.recurring and reminder.recurring.value != "NOT SPECIFIED":
-                    recurring_str = f" (повтор: {reminder.recurring.value})"
+                    recurring_str = f" (повтор: {reminder.get_recurring_display_str()})"
                 
                 confirmation_message = (
                     f"📝 Сообщение: {reminder.message}\n"
@@ -826,7 +828,7 @@ class TelegramBot:
                 message=reminder.message if reminder.message else None,
                 reminder_date=reminder.reminder_date if reminder.reminder_date else None,
                 timezone=reminder.timezone if reminder.timezone != "GMT+3" else None,
-                recurring_pattern=reminder.recurring.value if reminder.recurring else None,
+                recurring_pattern=reminder.get_recurring_pattern_for_db(),
             )
 
             # Clear editing state
@@ -868,10 +870,13 @@ class TelegramBot:
                 await query.answer("Напоминание не найдено", show_alert=True)
                 return
 
+            date_str = format_reminder_date_for_display(
+                reminder.reminder_date, reminder.timezone
+            )
             message = (
                 f"⚠️ Вы уверены, что хотите удалить это напоминание?\n\n"
                 f"💬 {reminder.message}\n"
-                f"📅 {reminder.reminder_date.strftime('%Y-%m-%d %H:%M')}\n\n"
+                f"📅 {date_str}\n\n"
                 f"Это действие нельзя отменить."
             )
 

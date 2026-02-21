@@ -25,7 +25,13 @@ from config.openrouter import (
     get_openrouter_base_url,
     get_openrouter_model,
 )
-from shared.models.reminder import ReminderCreate, ReminderCreateList
+from shared.models.reminder import (
+    RecurringPattern,
+    ReminderCreate,
+    ReminderCreateList,
+    format_recurring_pattern_display,
+    format_reminder_date_for_display,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +51,8 @@ REMINDER_EXTRACTION_SYSTEM_PROMPT = """Вы - агент для извлечен
             "message": "Текст напоминания",
             "reminder_date": "YYYY-MM-DDTHH:MM:SS+03:00",
             "timezone": "GMT+3",
-            "recurring": "NOT SPECIFIED" | "daily" | "weekly" | "monthly"
+            "recurring": "NOT SPECIFIED" | "daily" | "weekly" | "monthly" | "minutes",
+            "recurring_interval_minutes": null или число (только при recurring="minutes")
         }}
     ]
 }}
@@ -53,6 +60,8 @@ REMINDER_EXTRACTION_SYSTEM_PROMPT = """Вы - агент для извлечен
 Правила:
 - timezone всегда "GMT+3"
 - recurring: "NOT SPECIFIED" если пользователь не указал периодичность
+- recurring: "minutes" если пользователь сказал "каждые N минут" (напр. каждые 5 минут, каждые 15 минут)
+- recurring_interval_minutes: число N при recurring="minutes" (обязательно)
 - Если время не указано, используйте 9:00 утра
 - reminder_date должен быть в формате ISO с timezone: YYYY-MM-DDTHH:MM:SS+03:00
 - Если пользователь просит создать несколько напоминаний (например, "напомни мне в понедельник и вторник"),
@@ -179,7 +188,9 @@ class SchedulerAgent:
             for reminder in reminders:
                 reminder.user_id = user_id
                 reminder.timezone = "GMT+3"
-                
+                # Default recurring_interval_minutes for "every X minutes"
+                if reminder.recurring == RecurringPattern.EVERY_MINUTES and not reminder.recurring_interval_minutes:
+                    reminder.recurring_interval_minutes = 15
                 # Ensure timezone-aware datetime
                 if reminder.reminder_date.tzinfo is None:
                     reminder.reminder_date = reminder.reminder_date.replace(tzinfo=GMT3)
@@ -256,7 +267,7 @@ class SchedulerAgent:
             date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
             recurring_str = ""
             if reminder.recurring and reminder.recurring.value != "NOT SPECIFIED":
-                recurring_str = f" (повтор: {reminder.recurring.value})"
+                recurring_str = f" (повтор: {reminder.get_recurring_display_str()})"
 
             message = (
                 f"📝 Сообщение: {reminder.message}\n"
@@ -269,7 +280,7 @@ class SchedulerAgent:
                 date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
                 recurring_str = ""
                 if reminder.recurring and reminder.recurring.value != "NOT SPECIFIED":
-                    recurring_str = f" (повтор: {reminder.recurring.value})"
+                    recurring_str = f" (повтор: {reminder.get_recurring_display_str()})"
                 
                 message += (
                     f"{idx}. 📝 {reminder.message}\n"
@@ -298,10 +309,12 @@ class SchedulerAgent:
         message = f"📋 Ваши напоминания (показано до {limit}):\n\n"
 
         for idx, reminder in enumerate(reminders, 1):
-            date_str = reminder.reminder_date.strftime("%Y-%m-%d %H:%M")
+            date_str = format_reminder_date_for_display(
+                reminder.reminder_date, reminder.timezone
+            )
             recurring_str = ""
             if reminder.recurring_pattern:
-                recurring_str = f" (повтор: {reminder.recurring_pattern})"
+                recurring_str = f" (повтор: {format_recurring_pattern_display(reminder.recurring_pattern)})"
 
             message += (
                 f"{idx}. 🔔 {reminder.message}\n"

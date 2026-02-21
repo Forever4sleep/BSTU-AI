@@ -63,3 +63,13 @@ def get_poll_interval() -> int:
         Poll interval in seconds (defaults to 60)
     """
     return int(os.getenv("REMINDER_POLL_INTERVAL", "60"))
+
+
+def get_log_level() -> str:
+    """
+    Get log level from environment variable.
+
+    Returns:
+        Log level (defaults to INFO, use DEBUG for verbose polling logs)
+    """
+    return os.getenv("REMINDER_LOG_LEVEL", "INFO").upper()
