@@ -1,52 +1,72 @@
 # Reminder Service
 
-Standalone microservice that polls the PostgreSQL database for due reminders and sends them via Telegram Bot API.
+> **Микросервис отправки напоминаний**
 
-## Overview
+Отдельный сервис, который опрашивает PostgreSQL на предмет просроченных напоминаний и отправляет их пользователям через Telegram Bot API.
 
-This service runs independently from the main Telegram bot application. It continuously polls the database for reminders that are due and sends them to users via Telegram.
+---
 
-## Configuration
+## Как это работает
 
-The service requires the following environment variables:
+Сервис работает **независимо** от основного Telegram-бота. Он периодически проверяет базу данных на наличие напоминаний, время которых наступило, и отправляет их пользователям в Telegram.
 
-- `TELEGRAM_BOT_TOKEN` - Telegram bot token for sending reminder messages
-- `DATABASE_URL` - PostgreSQL connection URL (e.g., `postgresql://user:password@localhost:5432/dbname`)
-- `REMINDER_POLL_INTERVAL` - Poll interval in seconds (default: 60)
+```
+PostgreSQL ← опрос → Reminder Service → Telegram Bot API → пользователь
+```
 
-## Running the Service
+---
+
+## Конфигурация
+
+| Переменная | Описание |
+|------------|----------|
+| `TELEGRAM_BOT_TOKEN` | Токен бота для отправки сообщений |
+| `DATABASE_URL` | URL подключения к PostgreSQL (например, `postgresql://user:pass@localhost:5432/dbname`) |
+| `REMINDER_POLL_INTERVAL` | Интервал опроса в секундах (по умолчанию: 60) |
+
+---
+
+## Запуск
 
 ```bash
 python -m services.reminder_service.main
 ```
 
-Or from the project root:
+Или из корня проекта:
 
 ```bash
 python services/reminder_service/main.py
 ```
 
-## Architecture
+---
 
-The service follows a microservice pattern:
+## Архитектура
 
-- **Independent deployment**: Can be deployed separately from the main bot
-- **Database connection**: Connects directly to PostgreSQL
-- **Telegram integration**: Uses Telegram Bot API to send messages
-- **Polling mechanism**: Checks for due reminders at configured intervals
-- **Recurring reminders**: Handles recurring reminders by creating next occurrences
+| Принцип | Реализация |
+|---------|------------|
+| **Независимое развёртывание** | Можно запускать отдельно от основного бота |
+| **Подключение к БД** | Прямое подключение к PostgreSQL |
+| **Telegram** | Отправка через Bot API |
+| **Опрос** | Периодическая проверка по заданному интервалу |
+| **Повторяющиеся напоминания** | Создание следующих вхождений после отправки |
 
-## Components
+---
 
-- `service.py` - Main service class that handles polling and sending reminders
-- `database.py` - Database operations for reminders
-- `config.py` - Configuration management from environment variables
-- `main.py` - Entry point for the standalone service
+## Структура модуля
 
-## Future Enhancements
+| Файл | Назначение |
+|------|------------|
+| `service.py` | Основной класс сервиса: опрос и отправка |
+| `database.py` | Работа с базой напоминаний |
+| `config.py` | Конфигурация из переменных окружения |
+| `main.py` | Точка входа |
 
-- Docker containerization
+---
+
+## Планы развития
+
+- Контейнеризация (Docker)
 - Health check endpoints
-- Metrics and monitoring
-- Retry logic for failed message sends
-- Rate limiting for Telegram API
+- Метрики и мониторинг
+- Повторные попытки при ошибках отправки
+- Rate limiting для Telegram API

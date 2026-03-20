@@ -1,44 +1,59 @@
 # Upload Bot
 
-Telegram bot for admins to upload documents to the Ingestion Service. Receives files from Telegram and POSTs them to the Ingestion Service API.
+> **Telegram-бот для загрузки материалов в RAG**
 
-## Overview
+Отдельный бот для администраторов: приём документов через Telegram и отправка их в Ingestion Service для индексации.
 
-The Upload Bot is a lightweight microservice that:
-1. Receives document uploads from admins via Telegram
-2. Fetches subjects from Ingestion Service (`GET /api/subjects`)
-3. Shows subject selection buttons (from Qdrant payloads) or "Add new subject"
-4. User selects subject (or types new one)
-5. POSTs the file with subject to Ingestion Service `/api/upload`
-6. Replies with success or error
+---
 
-## Configuration
+## Сценарий работы
 
-Environment variables:
+1. Админ отправляет документ(ы) в бот  
+2. Бот запрашивает список предметов у Ingestion Service (`GET /api/subjects`)  
+3. Показывает кнопки выбора предмета (из Qdrant) или «Добавить новый»  
+4. Пользователь выбирает предмет или вводит новый  
+5. Файл отправляется в Ingestion Service (`POST /api/upload`)  
+6. Бот сообщает об успехе или ошибке  
 
-| Variable | Description |
-|----------|-------------|
-| `UPLOAD_BOT_TOKEN` | Telegram bot token (separate from main bot) |
-| `INGESTION_SERVICE_URL` | Base URL of Ingestion Service (e.g. `http://localhost:8001`) |
-| `ALLOWED_UPLOAD_USER_IDS` | Optional comma-separated Telegram user IDs (empty = all allowed) |
+> Поддерживается **пакетная загрузка**: несколько документов в одном сообщении — один выбор предмета на всю пачку.
 
-## Supported Formats
+---
 
-- PDF
-- DOCX
-- TXT
+## Конфигурация
 
-## Running the Bot
+| Переменная | Описание |
+|------------|----------|
+| `UPLOAD_BOT_TOKEN` | Токен бота (отдельный от основного) |
+| `INGESTION_SERVICE_URL` | URL Ingestion Service (например, `http://localhost:8001`) |
+| `ALLOWED_UPLOAD_USER_IDS` | Список Telegram ID через запятую (пусто = доступ всем) |
+
+---
+
+## Поддерживаемые форматы
+
+| Формат | Расширение |
+|--------|------------|
+| PDF | `.pdf` |
+| Word | `.docx`, `.doc` |
+| Текст | `.txt` |
+
+---
+
+## Запуск
 
 ```bash
 python -m services.upload_bot.main
 ```
 
-Ensure the Ingestion Service is running and reachable at `INGESTION_SERVICE_URL` before starting the bot.
+> Перед запуском убедитесь, что Ingestion Service доступен по `INGESTION_SERVICE_URL`.
 
-## Deployment
+---
 
-The bot uses polling (no webhook required). Deploy as a separate process/container. In Docker Compose, use the Ingestion Service hostname:
+## Развёртывание
+
+Бот использует **polling** (вебхук не требуется). Запускается отдельным процессом или контейнером.
+
+В Docker Compose используйте hostname Ingestion Service:
 
 ```
 INGESTION_SERVICE_URL=http://ingestion-service:8001

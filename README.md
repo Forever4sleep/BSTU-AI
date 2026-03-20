@@ -1,179 +1,168 @@
-# BSTU-AI
+<p align="center">
+  <strong>BSTU-AI</strong>
+</p>
+<p align="center">
+  <em>Интеллектуальный ассистент для студентов БГТУ</em>
+</p>
 
-A multi-agent AI system designed to help students automate academic tasks, accelerate learning, and enhance productivity.
-
----
-
-## Overview
-
-BSTU-AI is a diploma project that introduces an intelligent assistant system built on a multi-agent architecture. The system consists of specialized agents that handle different aspects of student life, all coordinated through a central orchestrator that understands user intent and routes requests appropriately.
-
-The system is designed to work entirely through natural language interaction, with no button-based interfaces—just pure conversational interaction.
-
----
-
-## Tech Stack
-
-- **Language**: Python
-- **LLM Framework**: LangChain, LangGraph
-- **LLM Provider**: OpenRouter (currently)
-- **Database**: Qdrant (for RAG), PostgreSQL (for structured data)
-- **Interface**: Telegram Bot API, Open WebUI (planned)
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/LangChain-0.3+-1C3C3C?style=flat" alt="LangChain" />
+  <img src="https://img.shields.io/badge/OpenRouter-LLM-AB68FF?style=flat" alt="OpenRouter" />
+</p>
 
 ---
 
-## Architecture
+## О проекте
 
-The system follows a multi-agent architecture pattern where specialized agents handle distinct domains of functionality. All agents are managed by a central **orchestrator** that:
+**BSTU-AI** — дипломный проект, представляющий систему умного помощника для студентов Белорусского государственного технического университета. Архитектура построена на специализированных агентах, каждый из которых отвечает за свою область: учёба, расписание и академическая информация.
 
-1. Extracts user intents from natural language input
-2. Routes requests to the appropriate agent based on detected intents
-3. Coordinates responses back to the user
+> Взаимодействие с системой происходит **полностью на естественном языке** — без кнопок и форм, только диалог.
 
 ---
 
-## Agents
+## Технологический стек
 
-The system currently consists of three specialized agents, each with a clearly defined responsibility domain:
-
-| Agent | Description |
-|-------|-------------|
-| **Learning Agent** | Helps students learn subjects faster using pre-loaded BSTU-specific materials (notes, lectures, etc.). Utilizes RAG (Retrieval-Augmented Generation) to provide context-aware explanations. Includes quiz generation and grading capabilities for better retention. |
-| **Academic Agent** | Provides centralized access to academic information including professor profiles, course requirements, exam conditions, and evaluation criteria. |
-| **Scheduler Agent** | Manages reminders and deadlines for coursework, exams, and other academic events. Fully natural-language driven with Telegram integration. | 
-
----
-
-## Supported Intents
-
-The system recognizes various intents that are routed to the appropriate agents. The intent list is continuously evolving as the project develops.
-
-### Learning Agent Intents
-
-| Intent | Description |
-|--------|-------------|
-| `learning.explain` | Explain a topic using BSTU-specific reference materials |
-| `learning.summarize` | Create a summary of a topic or material |
-| `learning.quiz.generate` | Generate a quiz to test the user's knowledge |
-| `learning.quiz.grade` | Grade user's quiz answers and provide explanations for mistakes |
-| `learning.plan.revision` | Propose a revision plan based on identified weak areas |
-
-### Academic Agent Intents
-
-| Intent | Description |
-|--------|-------------|
-| `academic.professor.profile` | Provide information about a professor and their courses |
-| `academic.course.requirements` | List course requirements, exam conditions, and evaluation criteria |
-
-### Scheduler Agent Intents
-
-| Intent | Description |
-|--------|-------------|
-| `schedule.lookup` | Look up event dates or class schedules |
-| `schedule.deadline.lookup` | Find deadlines for coursework or exams |
-| `schedule.reminder.create` | Create a reminder for an upcoming event or deadline |
-| `schedule.reminder.edit` | Edit an existing reminder |
-| `schedule.reminder.delete` | Delete an existing reminder |
-| `schedule.reminder.view` | View user's reminders (displays up to 5 reminders) |
+| Компонент | Технология |
+|-----------|------------|
+| Язык | Python |
+| LLM-фреймворк | LangChain, LangGraph |
+| Провайдер LLM | OpenRouter |
+| Базы данных | Qdrant (RAG), PostgreSQL (структурированные данные) |
+| Интерфейс | Telegram Bot API, Open WebUI (в планах) |
 
 ---
 
-## Project Status
+## Архитектура
 
-This project is currently under active development. The intent list and functionality are continuously being expanded and refined.
+Центральный **оркестратор** управляет всеми агентами и:
+
+1. **Распознаёт намерения** пользователя из текста сообщения
+2. **Маршрутизирует запросы** к нужному агенту
+3. **Формирует ответ** и возвращает его пользователю
+
+```
+Сообщение → Классификация намерений → Роутер → Агент → Ответ
+```
 
 ---
 
-## Running with Docker Compose
+## Агенты системы
 
-Run the entire system (PostgreSQL, Qdrant, main bot, reminder service, ingestion service, upload bot) with one command:
+| Агент | Описание |
+|-------|----------|
+| **Learning Agent** | Помогает быстрее осваивать предметы на основе материалов БГТУ (лекции, конспекты). Использует RAG для контекстных объяснений. Генерирует и проверяет тесты. |
+| **Academic Agent** | Централизованный доступ к академической информации: профили преподавателей, требования к курсам, условия экзаменов, критерии оценивания. |
+| **Scheduler Agent** | Управление напоминаниями и дедлайнами. Полностью на естественном языке с интеграцией в Telegram. |
+
+---
+
+## Поддерживаемые намерения
+
+### Learning Agent
+
+| Намерение | Описание |
+|-----------|----------|
+| `learning.explain` | Объяснение темы по материалам БГТУ |
+| `learning.summarize` | Краткое изложение темы или материала |
+| `learning.quiz.generate` | Генерация теста для проверки знаний |
+| `learning.quiz.grade` | Проверка ответов на тест с пояснениями ошибок |
+| `learning.plan.revision` | План повторения на основе слабых мест |
+
+### Academic Agent
+
+| Намерение | Описание |
+|-----------|----------|
+| `academic.professor.profile` | Информация о преподавателе и его курсах |
+| `academic.course.requirements` | Требования к курсу, условия экзамена, критерии оценивания |
+
+### Scheduler Agent
+
+| Намерение | Описание |
+|-----------|----------|
+| `schedule.lookup` | Поиск дат событий или расписания |
+| `schedule.deadline.lookup` | Поиск дедлайнов курсовых и экзаменов |
+| `schedule.reminder.create` | Создание напоминания |
+| `schedule.reminder.edit` | Редактирование напоминания |
+| `schedule.reminder.delete` | Удаление напоминания |
+| `schedule.reminder.view` | Просмотр напоминаний (до 5 шт.) |
+
+---
+
+## Быстрый старт
+
+### Запуск через Docker Compose
 
 ```bash
 cp .env.example .env
-# Edit .env and set your API keys and bot tokens
+# Заполните .env: API-ключи и токены ботов
 docker compose up --build
 ```
 
-Services:
-- **telegram-bot** – Main student-facing bot
-- **reminder-service** – Polls for due reminders, sends via Telegram
-- **ingestion-service** – FastAPI at http://localhost:8001 for document upload
-- **upload-bot** – Admin bot for uploading documents to RAG
-- **postgres** – PostgreSQL on port 5432
-- **qdrant** – Vector DB on port 6333
+### Сервисы
 
-**Web UIs:**
-- **Qdrant dashboard** – http://localhost:6333/dashboard
-- **FastAPI Swagger UI** – http://localhost:8001/docs
+| Сервис | Описание |
+|--------|----------|
+| **telegram-bot** | Основной бот для студентов |
+| **reminder-service** | Отправка напоминаний по расписанию |
+| **ingestion-service** | Загрузка и индексация документов (FastAPI на порту 8001) |
+| **upload-bot** | Бот для админов: загрузка материалов в RAG |
+| **postgres** | PostgreSQL (порт 5432) |
+| **qdrant** | Векторная БД (порт 6333) |
 
-Postgres defaults: `postgresql://bstu:bstu@postgres:5432/bstu_ai` (overridden in compose).
+### Веб-интерфейсы
 
----
-
-## Development Roadmap
-
-### Core Agent Implementation
-
-#### Learning Agent
-- [ ] Implement Learning Agent core functionality (RAG-based explanations and summaries)
-- [ ] Set up Qdrant vector database configuration and connection
-- [ ] Implement RAG pipeline for Learning Agent (document loading, chunking, embedding, indexing)
-- [ ] Implement quiz generation functionality for Learning Agent (`learning.quiz.generate` intent)
-- [ ] Implement quiz grading functionality for Learning Agent (`learning.quiz.grade` intent)
-- [ ] Implement revision planning functionality for Learning Agent (`learning.plan.revision` intent)
-
-#### Academic Agent
-- [ ] Implement Academic Agent core functionality (professor profiles and course requirements)
-- [ ] Create database schema and models for academic data (professors, courses, requirements)
-- [ ] Implement professor profile retrieval (`academic.professor.profile` intent)
-- [ ] Implement course requirements retrieval (`academic.course.requirements` intent)
-
-#### Scheduler Agent
-- [x] Implement reminder creation (`schedule.reminder.create` intent)
-- [x] Implement reminder editing (`schedule.reminder.edit` intent)
-- [x] Implement reminder deletion (`schedule.reminder.delete` intent)
-- [x] Implement reminder viewing (`schedule.reminder.view` intent)
-- [ ] Complete Scheduler Agent: implement `schedule.lookup` and `schedule.deadline.lookup` intents
-
-### Infrastructure & Configuration
-
-- [ ] Add missing dependencies to requirements.txt (qdrant-client, langgraph, embeddings library, etc.)
-- [ ] Add configuration management for Qdrant connection (host, port, collection name)
-- [ ] Add environment variable validation and startup checks
-
-### Integration & Routing
-
-- [ ] Update IntentRouter to route Learning Agent intents (`learning.explain`, `learning.summarize`, etc.)
-- [ ] Update IntentRouter to route Academic Agent intents (`academic.professor.profile`, `academic.course.requirements`)
-
-### Interfaces
-
-- [ ] Implement Open WebUI interface (`interfaces/webui/`)
-
-### Data & Processing
-
-- [ ] Create data ingestion pipeline for loading BSTU materials into RAG system
-- [ ] Implement document processing utilities (PDF, DOCX, TXT parsers) for RAG
-
-### Testing
-
-- [ ] Create unit tests for IntentClassifier
-- [ ] Create unit tests for IntentRouter
-- [ ] Create unit tests for Scheduler Agent
-- [ ] Create unit tests for Learning Agent
-- [ ] Create unit tests for Academic Agent
-- [ ] Create integration tests for end-to-end workflows
-
-### Quality & Operations
-
-- [ ] Add error handling and logging improvements across all agents
-- [ ] Create shared utilities module (`shared/utils/`) with common helper functions
-- [ ] Add API rate limiting and error recovery mechanisms
-- [ ] Implement conversation context/memory for multi-turn interactions
-- [ ] Create deployment documentation and setup instructions
+- **Qdrant Dashboard** — http://localhost:6333/dashboard  
+- **Swagger UI (Ingestion)** — http://localhost:8001/docs  
 
 ---
 
-**Legend:**
-- [x] Completed
-- [ ] Pending
+## Дорожная карта
+
+<details>
+<summary><strong>Learning Agent</strong></summary>
+
+- [ ] RAG: объяснения и саммари
+- [ ] Настройка Qdrant и подключение
+- [ ] Пайплайн RAG: загрузка, чанкинг, эмбеддинги, индексация
+- [ ] Генерация тестов (`learning.quiz.generate`)
+- [ ] Проверка тестов (`learning.quiz.grade`)
+- [ ] План повторения (`learning.plan.revision`)
+
+</details>
+
+<details>
+<summary><strong>Academic Agent</strong></summary>
+
+- [ ] Профили преподавателей и требования к курсам
+- [ ] Схема БД для академических данных
+- [ ] Получение профиля преподавателя
+- [ ] Получение требований к курсу
+
+</details>
+
+<details>
+<summary><strong>Scheduler Agent</strong></summary>
+
+- [x] Создание напоминаний
+- [x] Редактирование напоминаний
+- [x] Удаление напоминаний
+- [x] Просмотр напоминаний
+- [ ] Поиск расписания и дедлайнов
+
+</details>
+
+<details>
+<summary><strong>Инфраструктура и интерфейсы</strong></summary>
+
+- [ ] Маршрутизация Learning и Academic агентов
+- [ ] Open WebUI
+- [ ] Тесты и документация по развёртыванию
+
+</details>
+
+---
+
+## Статус проекта
+
+Проект в активной разработке. Список намерений и функциональность расширяются по мере развития.
