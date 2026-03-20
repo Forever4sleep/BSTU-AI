@@ -7,7 +7,6 @@ This document outlines the folder structure of the BSTU-AI project.
 ```
 BSTU-AI/
 ├── services/              # Standalone microservices
-│   ├── reminder_service/  # Polls DB for due reminders, sends via Telegram
 │   ├── ingestion_service/ # FastAPI: document upload, processing, Qdrant indexing
 │   └── upload_bot/        # Telegram bot for admin document uploads to Ingestion Service
 ├── orchestrator/          # Intent extraction and routing
@@ -15,11 +14,9 @@ BSTU-AI/
 │   ├── learning/         # Learning Agent (RAG-based)
 │   │   ├── rag/          # RAG implementation
 │   │   └── quizzes/      # Quiz generation and grading
-│   ├── academic/         # Academic Agent
-│   │   ├── profiles/     # Professor profiles
-│   │   └── courses/      # Course requirements
-│   └── scheduler/        # Scheduler Agent
-│       └── telegram/     # Telegram integration
+│   └── academic/         # Academic Agent
+│       ├── profiles/     # Professor profiles
+│       └── courses/      # Course requirements
 ├── shared/                # Shared utilities and models
 │   ├── intents/          # Intent definitions
 │   ├── models/           # Data models and schemas
@@ -39,7 +36,6 @@ BSTU-AI/
 
 ### `services/`
 Standalone microservices, each deployable independently:
-- **`reminder_service/`**: Polls PostgreSQL for due reminders and sends them via Telegram
 - **`ingestion_service/`**: FastAPI app for document upload, parsing, chunking, embedding, and indexing into Qdrant
 - **`upload_bot/`**: Telegram bot (separate token) for admins to upload documents; forwards files to Ingestion Service API
 
@@ -51,7 +47,6 @@ Contains all specialized agents, each following the single-responsibility princi
 
 - **`learning/`**: RAG-based learning agent with quiz functionality
 - **`academic/`**: Academic information retrieval agent
-- **`scheduler/`**: Deadline and reminder management agent
 
 ### `shared/`
 Common code used across multiple components:
@@ -71,7 +66,7 @@ Configuration files and settings for the system.
 
 ### `data/`
 Temporary data storage for processing:
-- **`materials/`**: Temporary storage for source files (PDF, DOCX, TXT, etc.) during RAG processing. Files are stored here temporarily while being processed and indexed into Qdrant, then can be deleted. Schedules are stored exclusively in PostgreSQL.
+- **`materials/`**: Temporary storage for source files (PDF, DOCX, TXT, etc.) during RAG processing. Files are stored here temporarily while being processed and indexed into Qdrant, then can be deleted.
 
 ### `tests/`
 Test suite for unit tests, integration tests, and test utilities.

@@ -101,32 +101,6 @@ Acts as a centralized academic information assistant.
 
 ---
 
-### 3. Scheduler Agent
-
-**Purpose**  
-Helps students manage academic time and deadlines.
-
-**Key Characteristics**
-- Fully **natural-language driven** (no buttons, no UI flows).
-- Integrates with **Telegram** for reminders and notifications.
-- Focuses on schedules, deadlines, and academic events.
-
-**Supported Intents**
-- `schedule.lookup` — look up class schedules or event dates.
-- `schedule.deadline.lookup` — find coursework or exam deadlines.
-- `schedule.reminder.create` — create reminders via Telegram.
-- `schedule.reminder.edit` — edit existing reminders using natural language.
-- `schedule.reminder.delete` — delete reminders via Telegram or chat input.
-- `schedule.reminder.list` — list all active reminders for the user.
-
-**Constraints**
-- Always confirm time-sensitive information when ambiguity exists.
-- Do not create reminders without sufficient temporal data.
-- Keep interactions concise and action-oriented.
-- Reminders do not have priorities. 
-
----
-
 ## Intent Handling Rules
 
 - Every user request must map to **one or multiple intents**.

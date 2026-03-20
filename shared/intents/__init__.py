@@ -9,12 +9,10 @@ from shared.intents.schemas import (
     AcademicIntent,
     IntentClassification,
     LearningIntent,
-    ScheduleIntent,
 )
 
 __all__ = [
     "IntentClassification",
     "LearningIntent",
     "AcademicIntent",
-    "ScheduleIntent",
 ]

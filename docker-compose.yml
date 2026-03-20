@@ -3,22 +3,6 @@
 # - FastAPI Swagger:  http://localhost:8001/docs
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: bstu
-      POSTGRES_PASSWORD: bstu
-      POSTGRES_DB: bstu_ai
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bstu -d bstu_ai"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   qdrant:
     image: qdrant/qdrant:latest
     ports:
@@ -30,21 +14,6 @@ services:
     build: .
     command: python run_telegram_bot.py
     env_file: .env
-    environment:
-      DATABASE_URL: postgresql://bstu:bstu@postgres:5432/bstu_ai
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  reminder-service:
-    build: .
-    command: python -m services.reminder_service.main
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql://bstu:bstu@postgres:5432/bstu_ai
-    depends_on:
-      postgres:
-        condition: service_healthy
 
   ingestion-service:
     build: .
@@ -57,8 +26,6 @@ services:
       - "8001:8001"
     depends_on:
       - qdrant
-    # restart: on-failure
-    # Reserve memory to reduce OOM risk during embedding of large documents
     mem_limit: 2g
 
   upload-bot:
@@ -72,5 +39,4 @@ services:
         condition: service_started
 
 volumes:
-  postgres_data:
   qdrant_data:
