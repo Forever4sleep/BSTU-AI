@@ -1,8 +1,7 @@
 """
 OpenRouter Embeddings
 
-Direct HTTP client for OpenRouter embeddings API to avoid
-OpenAI client compatibility issues with OpenRouter response format.
+Direct HTTP client for OpenRouter embeddings API.
 """
 
 import logging
@@ -10,15 +9,10 @@ from typing import List
 
 import httpx
 
-from services.ingestion_service.config import (
-    get_embedding_api_key,
-    get_embedding_model,
-    get_embedding_base_url,
-)
+from config import get_config
 
 logger = logging.getLogger(__name__)
 
-# Max texts per request (OpenRouter/OpenAI limit)
 BATCH_SIZE = 100
 
 
@@ -31,10 +25,11 @@ class OpenRouterEmbeddings:
         api_key: str | None = None,
         base_url: str | None = None,
     ):
-        self.model = model or get_embedding_model()
-        self.api_key = api_key or get_embedding_api_key()
-        self.base_url = (base_url or get_embedding_base_url()).rstrip("/")
-        self._url = f"{self.base_url}/embeddings"
+        config = get_config()
+        self.model = model or config.embedding_model
+        self.api_key = api_key or config.embedding_api_key
+        base = base_url or config.embedding_base_url_resolved
+        self._url = f"{base.rstrip('/')}/embeddings"
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """
@@ -90,7 +85,6 @@ class OpenRouterEmbeddings:
                 f"No embedding data received. Response: {data}"
             )
 
-        # Extract embeddings in order (API returns with optional index field)
         items = data["data"]
         if len(items) != len(texts):
             logger.warning(

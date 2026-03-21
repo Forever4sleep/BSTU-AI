@@ -1,17 +1,14 @@
 """
 Database Configuration
 
-Handles PostgreSQL database connection configuration and setup.
+PostgreSQL connection pool. Использует config.get_config().database_url.
 """
 
-import os
 from typing import Optional
 
 import asyncpg
-from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+from config import get_config
 
 logger = None
 
@@ -28,26 +25,18 @@ def _get_logger():
 
 def get_database_url() -> str:
     """
-    Get PostgreSQL database connection URL from environment variable.
-
-    Format: postgresql://user:password@host:port/database
-
-    Returns:
-        Database connection URL
+    PostgreSQL connection URL из config.
 
     Raises:
-        ValueError: If DATABASE_URL is not set
+        ValueError: Если DATABASE_URL не задан
     """
-    database_url = os.getenv("DATABASE_URL")
-
-    if not database_url:
+    url = get_config().database_url
+    if not url:
         raise ValueError(
-            "DATABASE_URL not found in environment variables. "
-            "Please set it in your .env file or environment. "
-            "Format: postgresql://user:password@host:port/database"
+            "DATABASE_URL не задан в .env. "
+            "Формат: postgresql://user:password@host:port/database"
         )
-
-    return database_url
+    return url
 
 
 async def create_connection_pool(

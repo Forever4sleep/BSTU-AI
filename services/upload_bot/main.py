@@ -18,7 +18,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from services.upload_bot.bot import UploadBot
-from services.upload_bot.config import (
+from config import (
     get_allowed_upload_user_ids,
     get_ingestion_service_url,
     get_upload_bot_token,

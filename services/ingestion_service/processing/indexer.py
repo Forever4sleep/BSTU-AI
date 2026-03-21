@@ -12,8 +12,8 @@ from typing import List, Protocol
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
 
+from services.ingestion_service.processing.chunker import ChunkerStrategy
 from services.ingestion_service.processing.parsers import parse_document
-from services.ingestion_service.processing.chunker import chunk_text
 
 logger = logging.getLogger(__name__)
 
@@ -25,31 +25,35 @@ class EmbeddingsProtocol(Protocol):
 
 
 class DocumentIndexer:
-    """Indexes documents into Qdrant via embedding and upsert."""
+    """
+    Context for chunking: holds a ChunkerStrategy and delegates chunking to it.
+
+    Follows Strategy pattern (refactoring.guru). Strategy can be swapped at runtime.
+    """
 
     def __init__(
         self,
         qdrant_client: QdrantClient,
         collection_name: str,
         embeddings: EmbeddingsProtocol,
+        chunker: ChunkerStrategy,
     ):
-        """
-        Initialize the indexer.
-
-        Args:
-            qdrant_client: Qdrant client instance
-            collection_name: Target collection name
-            embeddings: Embeddings instance with embed_documents(texts) -> List[List[float]]
-        """
         self.client = qdrant_client
         self.collection_name = collection_name
         self.embeddings = embeddings
+        self._chunker = chunker
+
+    @property
+    def chunker(self) -> ChunkerStrategy:
+        return self._chunker
+
+    @chunker.setter
+    def chunker(self, strategy: ChunkerStrategy) -> None:
+        self._chunker = strategy
 
     def index_file(
         self,
         file_path: Path,
-        chunk_size: int = 500,
-        chunk_overlap: int = 50,
         metadata: dict | None = None,
     ) -> int:
         """
@@ -57,8 +61,6 @@ class DocumentIndexer:
 
         Args:
             file_path: Path to the document
-            chunk_size: Chunk size in characters
-            chunk_overlap: Overlap between chunks
             metadata: Optional metadata to attach to all chunks
 
         Returns:
@@ -72,10 +74,17 @@ class DocumentIndexer:
             logger.error(f"Indexer: parse failed for {file_path.name}: {e}", exc_info=True)
             raise
 
-        chunks = chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        text_len = len(text) if text else 0
+        text_preview = (text or "")[:200].replace("\n", " ")
+        logger.info(f"Indexer: parsed {text_len} chars from {file_path.name}, preview: {text_preview!r}...")
+
+        chunks = self._chunker.chunk(text)
 
         if not chunks:
-            logger.warning(f"Indexer: no chunks extracted from {file_path.name}")
+            logger.warning(
+                f"Indexer: no chunks from {file_path.name} "
+                f"(parsed {text_len} chars - empty or too short for chunk_size)"
+            )
             return 0
 
         logger.info(f"Indexer: embedding {len(chunks)} chunks via API")
@@ -91,17 +100,18 @@ class DocumentIndexer:
 
         logger.info(f"Indexer: got {len(vectors)} vectors, building points for Qdrant")
 
-        # Build points for Qdrant
-        meta = metadata or {}
-        meta["source_file"] = file_path.name
+        meta = dict(metadata or {})
+        if "source_file" not in meta:
+            meta["source_file"] = file_path.name
 
+        # LangChain QdrantVectorStore expects text under `text` and metadata nested.
         points = [
             PointStruct(
                 id=str(uuid.uuid4()),
                 vector=vec,
                 payload={
                     "text": chunk,
-                    **meta,
+                    "metadata": dict(meta),
                 },
             )
             for chunk, vec in zip(chunks, vectors)

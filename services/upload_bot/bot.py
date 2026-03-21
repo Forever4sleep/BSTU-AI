@@ -4,8 +4,10 @@ Upload Bot Implementation
 Telegram bot for subject-specific document uploads to Ingestion Service.
 User sends document(s), selects subject via buttons, then document(s) are indexed.
 Supports batch upload: multiple documents sent as album share one subject selection.
+Documents are processed asynchronously via Celery; bot polls job status.
 """
 
+import asyncio
 import logging
 import tempfile
 from pathlib import Path
@@ -21,17 +23,19 @@ from telegram.ext import (
     filters,
 )
 
-from services.upload_bot.config import (
+from config import (
     get_allowed_upload_user_ids,
     get_ingestion_service_url,
 )
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt"}
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".pptx", ".xlsx", ".md", ".html", ".htm", ".csv", ".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".webp", ".txt"}
 CALLBACK_SUBJECT_PREFIX = "subject:"
 CALLBACK_NEW_SUBJECT = "subject:__new__"
 MEDIA_GROUP_DELAY_SEC = 2
+JOB_POLL_INTERVAL_SEC = 2
+JOB_POLL_TIMEOUT_SEC = 300
 
 
 class UploadBot:
@@ -90,7 +94,7 @@ class UploadBot:
 
         await update.message.reply_text(
             "Загрузка материалов BSTU-AI\n\n"
-            "Поддерживаемые форматы: PDF, DOCX, TXT\n\n"
+            "Поддерживаемые форматы: PDF, DOCX, PPTX, XLSX, MD, HTML, CSV, изображения, TXT\n\n"
             "Отправьте документ или пачку документов, затем выберите предмет "
             "(для пачки — один раз на всю пачку)."
         )
@@ -104,6 +108,29 @@ class UploadBot:
                 return []
             data = response.json()
             return data.get("subjects", [])
+
+    async def _poll_job_status(
+        self,
+        job_id: str,
+        client: httpx.AsyncClient,
+    ) -> dict | None:
+        """Poll job status until SUCCESS or FAILURE. Returns result dict or None."""
+        elapsed = 0
+        while elapsed < JOB_POLL_TIMEOUT_SEC:
+            resp = await client.get(
+                f"{self.ingestion_service_url}/api/jobs/{job_id}",
+            )
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            status = data.get("status", "").upper()
+            if status == "SUCCESS":
+                return data
+            if status == "FAILURE":
+                return data
+            await asyncio.sleep(JOB_POLL_INTERVAL_SEC)
+            elapsed += JOB_POLL_INTERVAL_SEC
+        return None
 
     def _build_subject_keyboard(self, subjects: list[str]) -> InlineKeyboardMarkup:
         """Build inline keyboard with subject buttons (index-based for callback_data limit)."""
@@ -136,7 +163,7 @@ class UploadBot:
         if suffix not in SUPPORTED_EXTENSIONS:
             await update.message.reply_text(
                 f"Неподдерживаемый формат: {suffix}. "
-                f"Поддерживаются: PDF, DOCX, TXT"
+                f"Поддерживаются: PDF, DOCX, PPTX, XLSX, MD, HTML, CSV, PNG, JPG, TXT"
             )
             return
 
@@ -329,20 +356,38 @@ class UploadBot:
                         with open(tmp_path, "rb") as f:
                             files = {"file": (file_name, f, "application/octet-stream")}
                             data = {"subject": subject}
-                            async with httpx.AsyncClient(timeout=180.0) as client:
-                                response = await client.post(upload_url, files=files, data=data)
-
-                        if response.status_code == 200:
-                            resp_data = response.json()
-                            results.append((
-                                resp_data.get("filename", file_name),
-                                resp_data.get("chunks_indexed", 0),
-                            ))
-                        else:
-                            error_detail = response.json().get("detail", response.text)
-                            errors.append(f"{file_name}: {error_detail}")
+                            async with httpx.AsyncClient(timeout=300.0) as client:
+                                response = await client.post(
+                                    upload_url, files=files, data=data
+                                )
+                                if response.status_code == 200:
+                                    resp_data = response.json()
+                                    job_id = resp_data.get("job_id")
+                                    if job_id:
+                                        job_result = await self._poll_job_status(
+                                            job_id, client
+                                        )
+                                        if job_result and job_result.get("status") == "SUCCESS":
+                                            results.append((
+                                                job_result.get("filename", file_name),
+                                                job_result.get("chunks_indexed", 0) or 0,
+                                            ))
+                                        else:
+                                            err = job_result.get("error", "Timeout") if job_result else "Timeout"
+                                            errors.append(f"{file_name}: {err}")
+                                    else:
+                                        results.append((
+                                            resp_data.get("filename", file_name),
+                                            resp_data.get("chunks_indexed", 0),
+                                        ))
+                                else:
+                                    error_detail = response.json().get("detail", response.text)
+                                    errors.append(f"{file_name}: {error_detail}")
                     finally:
-                        tmp_path.unlink(missing_ok=True)
+                        try:
+                            tmp_path.unlink()
+                        except OSError:
+                            pass
                 except Exception as e:
                     logger.error(f"Error uploading {file_name}: {e}", exc_info=True)
                     errors.append(f"{file_name}: {str(e)}")

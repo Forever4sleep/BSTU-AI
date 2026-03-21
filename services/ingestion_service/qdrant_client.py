@@ -10,12 +10,7 @@ from typing import Optional
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 
-from services.ingestion_service.config import (
-    get_embedding_dimension,
-    get_qdrant_collection_name,
-    get_qdrant_host,
-    get_qdrant_port,
-)
+from config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +29,9 @@ def create_qdrant_client(
     Returns:
         Configured QdrantClient instance
     """
-    host = host or get_qdrant_host()
-    port = port or get_qdrant_port()
+    config = get_config()
+    host = host or config.qdrant_host
+    port = port or config.qdrant_port
     client = QdrantClient(host=host, port=port, timeout=30)
     logger.info(f"Connected to Qdrant at {host}:{port}")
     return client
@@ -43,18 +39,21 @@ def create_qdrant_client(
 
 def ensure_collection(
     client: QdrantClient,
-    collection_name: str,
-    vector_size: int | None = None,
+    collection_name: Optional[str] = None,
+    vector_size: Optional[int] = None,
 ) -> None:
     """
     Ensure the collection exists, creating it if necessary.
 
     Args:
         client: Qdrant client
-        collection_name: Name of the collection
+        collection_name: Name of the collection (from config if None)
         vector_size: Dimension of embedding vectors (from config if None)
     """
-    vector_size = vector_size or get_embedding_dimension()
+    config = get_config()
+    collection_name = collection_name or config.qdrant_collection_name
+    vector_size = vector_size or config.embedding_dimension
+
     collections = client.get_collections().collections
     existing = [c.name for c in collections]
 

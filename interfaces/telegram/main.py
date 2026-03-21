@@ -9,7 +9,7 @@ import logging
 import sys
 
 from interfaces.telegram.bot import TelegramBot
-from interfaces.telegram.config import get_telegram_token
+from config import get_telegram_token
 
 # Configure logging
 logging.basicConfig(

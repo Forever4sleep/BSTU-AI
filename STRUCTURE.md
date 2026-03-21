@@ -6,6 +6,8 @@ This document outlines the folder structure of the BSTU-AI project.
 
 ```
 BSTU-AI/
+├── prompts/               # YAML prompt templates (e.g. Classified RAG system text)
+├── rag/                   # Shared RAG: strategies (hybrid BM25+dense), LangChain, pipeline
 ├── services/              # Standalone microservices
 │   ├── ingestion_service/ # FastAPI: document upload, processing, Qdrant indexing
 │   └── upload_bot/        # Telegram bot for admin document uploads to Ingestion Service
@@ -33,6 +35,12 @@ BSTU-AI/
 ```
 
 ## Directory Descriptions
+
+### `prompts/`
+YAML files and loaders for LLM / RAG system prompts (e.g. `classified_rag.yaml`).
+
+### `rag/`
+Factory-паттерн RAG для OpenAI-совместимого чата (`/v1/chat/completions`). `RAGFactory.create("classic", qdrant_client=client)` собирает **ClassicRAG** — `DenseRetriever` (Qdrant, косинус) + `SparseBM25Retriever`, fusion через взвешенную линейную комбинацию (`alpha·dense + (1−alpha)·BM25` с min-max нормализацией). Новые типы (например, `GraphRAG`) добавляются через `RAGFactory.register()`. Промпты загружаются из `prompts/classified_rag.yaml`.
 
 ### `services/`
 Standalone microservices, each deployable independently:
