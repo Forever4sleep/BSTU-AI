@@ -2,11 +2,13 @@
   <strong>BSTU-AI</strong>
 </p>
 <p align="center">
-  <em>Интеллектуальный ассистент для студентов БГТУ</em>
+  <em>Интеллектуальная платформа для обучения студентов БГТУ</em>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat&logo=react&logoColor=black" alt="React" />
   <img src="https://img.shields.io/badge/LangChain-0.3+-1C3C3C?style=flat" alt="LangChain" />
   <img src="https://img.shields.io/badge/OpenRouter-LLM-AB68FF?style=flat" alt="OpenRouter" />
   <img src="https://img.shields.io/badge/LangSmith-Tracing-00A67E?style=flat" alt="LangSmith" />
@@ -16,9 +18,18 @@
 
 ## О проекте
 
-**BSTU-AI** — дипломный проект, представляющий систему умного помощника для студентов БГТУ. Архитектура построена на специализированных агентах, каждый из которых отвечает за свою область: учёба и академическая информация.
+**BSTU-AI** — дипломный проект: платформа для студентов и преподавателей БГТУ с RAG-чатом по учебным материалам, задачами (код, тесты, свободный ответ), AI-генерацией черновиков заданий и администрированием курсов.
 
-> Взаимодействие с системой происходит **полностью на естественном языке** — без кнопок и форм, только диалог.
+Центральный backend — **Ingestion Service** (FastAPI): индексация документов, OpenAI-совместимый чат, REST платформы задач и фоновые Celery-задачи.
+
+Пользовательские интерфейсы:
+
+| Интерфейс | Назначение |
+|-----------|------------|
+| **Problem Platform UI** (`frontend/`, :5173) | Основной веб-интерфейс: студенты, преподаватели, админ |
+| **Open WebUI** (:3000, опционально) | Универсальный чат поверх `/v1/chat/completions` |
+| **Telegram Bot** (опционально) | Классификация намерений; маршрутизация к агентам — в разработке |
+| **Upload Bot** (опционально) | Загрузка материалов админами через Telegram |
 
 ---
 
@@ -26,38 +37,80 @@
 
 | Компонент | Технология |
 |-----------|------------|
-| Язык | Python 3.11+ |
-| LLM-фреймворк | LangChain |
-| Провайдер LLM | OpenRouter |
-| Базы данных | Qdrant (векторная), PostgreSQL (история диалогов) |
+| Backend | Python 3.11+, FastAPI, Celery |
+| Frontend | React 18, TypeScript, Vite, Monaco Editor |
+| LLM / эмбеддинги | OpenRouter (LangChain, LangGraph) |
+| Векторная БД | Qdrant (глобальная коллекция + коллекции на курс) |
+| Реляционная БД | PostgreSQL (диалоги, курсы, задачи, пользователи) |
+| Очередь | Redis + Celery |
+| Парсинг документов | Docling (VLM для PDF через OpenRouter) |
 | RAG | Гибридный поиск (Dense + BM25), промпты из YAML |
 | Трассировка | LangSmith |
-| Очередь задач | Celery + Redis |
-| Интерфейс | Telegram Bot API, Open WebUI (чат) |
+| Контейнеризация | Docker Compose, Makefile |
 
 ---
 
 ## Архитектура
 
-Центральный **оркестратор** управляет всеми агентами и:
-
-1. **Распознаёт намерения** пользователя из текста сообщения
-2. **Маршрутизирует запросы** к нужному агенту
-3. **Формирует ответ** и возвращает его пользователю
-
 ```
-Сообщение → Классификация намерений → Роутер → Агент → Ответ
+┌─────────────────────────────────────────────────────────────────┐
+│                        Интерфейсы                               │
+│  Problem Platform UI   Open WebUI   Telegram Bot   Upload Bot   │
+│       :5173               :3000          (bots)       (bots)    │
+└────────────┬────────────────┬──────────────┬──────────────┬─────┘
+             │                │              │              │
+             └────────────────┴──────────────┴──────────────┘
+                                    │
+                          Ingestion Service :8001
+                    ┌─────────────────┼─────────────────┐
+                    │                 │                 │
+              /api/upload      /api/platform      /v1/chat/completions
+              /api/jobs        /api/public              │
+                    │                 │            RAG (rag/)
+                    ▼                 ▼                 ▼
+              Celery Worker    PostgreSQL          OpenRouter
+                    │          (platform + chats)
+                    ▼
+                 Qdrant
+           (bstu_materials + course_*)
 ```
 
----
+### Ingestion Service
 
-## RAG-пайплайн
+Единая точка входа для:
 
-Ingestion Service предоставляет OpenAI-совместимый API (`/v1/chat/completions`), через который **Open WebUI** общается с LLM. Перед отправкой запроса к LLM срабатывает RAG-пайплайн:
+- **Индексации материалов** — парсинг (Docling/VLM), chunking, эмбеддинги, upsert в Qdrant; асинхронно через Celery.
+- **RAG-чата** — OpenAI-совместимый `/v1/chat/completions` с гибридным retrieval; per-course коллекции для чата по курсу.
+- **Платформы задач** — курсы, группы, студенты, задачи, отправки, черновики, аналитика (`/api/platform`, `/api/public`).
+
+Подробнее: [services/ingestion_service/README.md](services/ingestion_service/README.md).
+
+### Problem Platform UI
+
+React SPA в `frontend/`:
+
+- **Студент** — курсы, решение задач (Monaco для Python), RAG-чат по материалам курса, личный кабинет.
+- **Преподаватель** — управление курсами, загрузка материалов, публикация задач, AI-генерация черновиков, аналитика.
+- **Администратор** — учётные группы, студенты, создание преподавателей.
+
+API проксируется через Vite dev-server на Ingestion Service.
+
+### RAG-пайплайн
+
+Общая библиотека в `rag/`. Сборка через `RAGFactory`:
+
+```python
+from rag import RAGFactory
+
+rag = RAGFactory.create("classic", qdrant_client=client)
+# Per-course чат:
+rag = RAGFactory.classic_for_collection(client, "course_algorithms", course_slug="algorithms")
+```
 
 ```
 Запрос пользователя
   → ContextualQueryProcessor (склеивает последние сообщения)
+  → [Agent Checker — для чата курса: блокировка подсказок по заданиям]
   → HybridRetriever
       ├── DenseRetriever (Qdrant, косинусное сходство)
       └── SparseBM25Retriever (BM25 по корпусу из Qdrant)
@@ -66,146 +119,195 @@ Ingestion Service предоставляет OpenAI-совместимый API (
   → LLM (через OpenRouter)
 ```
 
-### Ключевые особенности
+Подробнее: [rag/README.md](rag/README.md).
 
-- **Factory-паттерн** — `RAGFactory.create("classic", qdrant_client=client)` собирает `ClassicRAG` из компонентов через DI. Для нового типа (например, `GraphRAG`) достаточно реализовать `BaseRAG` и зарегистрировать через `RAGFactory.register()`.
-- **Гибридный поиск** — взвешенная линейная комбинация нормализованных скоров Dense и BM25 (параметр `RAG_HYBRID_ALPHA`).
-- **Порог релевантности** — если лучший гибридный скор ниже `RAG_RELEVANCE_THRESHOLD`, модель отвечает отказом вместо галлюцинации.
-- **История диалога** — последние сообщения учитываются при формировании запроса к retriever; диалоги сохраняются в PostgreSQL.
-- **Промпты из YAML** — системные инструкции для RAG загружаются из `prompts/classified_rag.yaml`, на русском языке.
-- **LangSmith-трассировка** — полная видимость пайплайна: запрос, история, найденные чанки, скоры (dense, BM25, hybrid), ответ LLM.
+### Оркестратор и агенты (в разработке)
 
----
+Задуманная мультиагентная модель (`orchestrator/`, `agents/`):
 
-## Агенты системы
+```
+Сообщение → IntentClassifier (LLM) → IntentRouter → Агент → Ответ
+```
 
-| Агент | Описание |
-|-------|----------|
-| **Learning Agent** | Помогает быстрее осваивать предметы на основе материалов БГТУ (лекции, конспекты). Использует RAG для контекстных объяснений. Генерирует и проверяет тесты. |
-| **Academic Agent** | Централизованный доступ к академической информации: профили преподавателей, требования к курсам, условия экзаменов, критерии оценивания. |
+Сейчас **IntentClassifier** работает в Telegram-боте; **IntentRouter** и агенты (Learning, Academic) — заготовки. Основной пользовательский функционал реализован через платформу задач и RAG-чат Ingestion Service.
 
 ---
 
-## Поддерживаемые намерения
+## Платформа задач (кратко)
 
-### Learning Agent
+| Роль | Возможности |
+|------|-------------|
+| Админ | Группы, студенты, bootstrap преподавателей |
+| Преподаватель | Курсы, материалы → Qdrant, задачи (coding / MCQ / free text), AI-черновики (LangGraph), публикация |
+| Студент | Доступ по группе, решение задач, RAG-чат с античитом |
 
-| Намерение | Описание |
-|-----------|----------|
-| `learning.explain` | Объяснение темы по материалам БГТУ |
-| `learning.summarize` | Краткое изложение темы или материала |
-| `learning.quiz.generate` | Генерация теста для проверки знаний |
-| `learning.quiz.grade` | Проверка ответов на тест с пояснениями ошибок |
-| `learning.plan.revision` | План повторения на основе слабых мест |
+**Типы задач:** `coding` (Python + тесты), `mcq`, `free_text`.
 
-### Academic Agent
+**AI-черновики:** Celery + LangGraph (`draft_graph`) — отбор контекста из Qdrant курса и генерация пакета задач.
 
-| Намерение | Описание |
-|-----------|----------|
-| `academic.professor.profile` | Информация о преподавателе и его курсах |
-| `academic.course.requirements` | Требования к курсу, условия экзамена, критерии оценивания |
+**Античит в чате:** Agent Checker (LangGraph) + опциональное cosine-сходство с условиями задач (`RAG_PROBLEM_MATCH_*`, режим в настройках курса: `off` / `basic` / `advanced`).
 
 ---
 
 ## Быстрый старт
 
-### Запуск через Docker Compose
+### 1. Конфигурация
 
 ```bash
 cp .env.example .env
-# Обязательно: OPENROUTER_API_KEY в .env
-docker compose up --build
+# Обязательно: OPENROUTER_API_KEY
+# Для платформы: PLATFORM_JWT_SECRET, PLATFORM_ADMIN_* , PLATFORM_BOOTSTRAP_SECRET
 ```
 
-По умолчанию запускаются все основные сервисы: **qdrant**, **postgres**, **redis**, **ingestion-service**, **open-webui**.
+### 2. Docker Compose (рекомендуется)
 
-### Конфигурация RAG (`.env`)
+```bash
+make env          # .env из примера, если ещё нет
+make up           # ядро: postgres, redis, qdrant, api, celery
+make ui           # веб-платформа :5173
+make webui        # Open WebUI :3000 (опционально)
+make bots         # telegram + upload боты (опционально)
+make stack-full   # всё сразу
+```
+
+После изменения `requirements.txt` или Dockerfile:
+
+```bash
+make up-build     # или make stack-full-build
+```
+
+### 3. Локальная разработка UI
+
+```bash
+cd frontend && npm install && npm run dev
+# Vite проксирует API на localhost:8001 (см. frontend/.env.example)
+```
+
+### Проверка
+
+| URL | Назначение |
+|-----|------------|
+| http://localhost:5173 | Problem Platform UI |
+| http://localhost:8001/docs | Swagger (Ingestion Service) |
+| http://localhost:8001/api/health | Health check |
+| http://localhost:6333/dashboard | Qdrant Dashboard |
+| http://localhost:3000 | Open WebUI (профиль `openwebui`) |
+
+```bash
+make health
+curl -X POST http://localhost:8001/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+  -d '{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"Привет!"}]}'
+```
+
+---
+
+## Сервисы и профили Docker
+
+| Сервис | Порт | Профиль | Описание |
+|--------|:----:|:-------:|----------|
+| **ingestion-service** | 8001 | *(ядро)* | FastAPI: upload, RAG, platform API, `/v1` |
+| **celery-worker** | — | *(ядро)* | Индексация документов, draft/agent jobs |
+| **postgres** | 5432 | *(ядро)* | Платформа + история диалогов |
+| **redis** | 6379 | *(ядро)* | Брокер Celery |
+| **qdrant** | 6333 | *(ядро)* | Векторная БД |
+| **problem-platform-ui** | 5173 | `platform` | Vite + React frontend |
+| **open-webui** | 3000 | `openwebui` | Внешний чат-клиент |
+| **telegram-bot** | — | `bots` | Основной Telegram-бот |
+| **upload-bot** | — | `bots` | Загрузка материалов в Telegram |
+
+---
+
+## Конфигурация RAG (`.env`)
 
 | Переменная | По умолчанию | Описание |
 |------------|:------------:|----------|
-| `RAG_ENABLED` | `true` | Включить RAG в `/v1/chat/completions` |
-| `RAG_TOP_K` | `5` | Кол-во чанков после fusion |
+| `RAG_ENABLED` | `true` | RAG в `/v1/chat/completions` |
+| `RAG_TOP_K` | `5` | Чанков после fusion |
 | `RAG_BM25_K` | `5` | Top-k для BM25 |
 | `RAG_BM25_MAX_DOCS` | `10000` | Макс. документов для BM25-корпуса |
 | `RAG_HYBRID_ALPHA` | `0.5` | alpha·dense + (1−alpha)·BM25 |
 | `RAG_RELEVANCE_THRESHOLD` | `0.0` | Мин. гибридный скор; ниже → отказ (0 = выкл.) |
-| `RAG_QUERY_MAX_TURNS` | `3` | Сколько последних сообщений склеивать для запроса |
-| `ENABLE_THINKING` | `true` | Включить reasoning (thinking) у LLM |
+| `RAG_QUERY_MAX_TURNS` | `3` | Сколько последних сообщений склеивать |
+| `RAG_PROBLEM_MATCH_ENABLED` | `true` | Античит: сопоставление с задачами курса |
+| `RAG_PROBLEM_MATCH_THRESHOLD` | `0.82` | Порог cosine для режима `basic` |
+| `ENABLE_THINKING` | `true` | Reasoning у LLM (OpenRouter) |
 
-### Трассировка (LangSmith)
-
-| Переменная | Описание |
-|------------|----------|
-| `LANGSMITH_TRACING` | `true` / `false` — включить трассировку |
-| `LANGSMITH_API_KEY` | API-ключ LangSmith |
-| `LANGSMITH_PROJECT` | Имя проекта в LangSmith |
-
-### Тестирование API
-
-После запуска:
-- **Swagger UI**: http://localhost:8001/docs
-- **Health**: `curl http://localhost:8001/api/health`
-- **Chat**: `curl -X POST http://localhost:8001/v1/chat/completions -H "Content-Type: application/json" -H "Authorization: Bearer $OPENROUTER_API_KEY" -d '{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"Привет!"}]}'`
+Полный список переменных — в [.env.example](.env.example).
 
 ---
 
-## Сервисы
+## Структура репозитория
 
-| Сервис | Порт | Описание |
-|--------|:----:|----------|
-| **ingestion-service** | 8001 | FastAPI: загрузка документов, RAG, OpenAI-совместимый API |
-| **open-webui** | 3000 | Веб-чат, подключён к ingestion-service через `/v1` |
-| **qdrant** | 6333 | Векторная БД |
-| **postgres** | 5432 | История диалогов |
-| **redis** | 6379 | Брокер задач Celery |
-| **celery-worker** | — | Фоновая обработка документов |
-| **telegram-bot** | — | Основной бот для студентов |
-| **upload-bot** | — | Бот для админов: загрузка материалов |
+```
+BSTU-AI/
+├── frontend/              # Problem Platform UI (React + Vite)
+├── services/
+│   ├── ingestion_service/ # Центральный FastAPI backend
+│   └── upload_bot/        # Telegram-бот загрузки материалов
+├── rag/                   # RAG: factory, retrievers, query, prompts
+├── orchestrator/          # Классификация и маршрутизация намерений
+├── agents/                # Learning / Academic агенты (заготовки)
+├── interfaces/            # Telegram bot, webui-обёртки
+├── prompts/               # YAML-промпты для RAG
+├── config/                # Pydantic-конфиг из .env
+├── shared/                # Схемы намерений, модели
+├── data/materials/        # Временное хранилище файлов при индексации
+└── docker-compose.yml     # Профили: platform, openwebui, bots
+```
 
-### Веб-интерфейсы
-
-- **Open WebUI** (чат) — http://localhost:3000
-- **Qdrant Dashboard** — http://localhost:6333/dashboard
-- **Swagger UI (Ingestion)** — http://localhost:8001/docs
+Подробнее: [STRUCTURE.md](STRUCTURE.md).
 
 ---
 
 ## Дорожная карта
 
 <details>
-<summary><strong>Learning Agent</strong></summary>
+<summary><strong>Платформа задач</strong></summary>
 
-- [x] RAG: объяснения и саммари
-- [x] Настройка Qdrant и подключение
-- [x] Пайплайн RAG: загрузка, чанкинг, эмбеддинги, индексация
-- [x] Гибридный поиск (Dense + BM25) с порогом релевантности
-- [x] LangSmith-трассировка RAG-пайплайна
-- [x] История диалогов (PostgreSQL)
-- [ ] Генерация тестов (`learning.quiz.generate`)
-- [ ] Проверка тестов (`learning.quiz.grade`)
-- [ ] План повторения (`learning.plan.revision`)
-
-</details>
-
-<details>
-<summary><strong>Academic Agent</strong></summary>
-
-- [ ] Профили преподавателей и требования к курсам
-- [ ] Схема БД для академических данных
-- [ ] Получение профиля преподавателя
-- [ ] Получение требований к курсу
+- [x] Курсы, группы, студенты, преподаватели, JWT-авторизация
+- [x] Загрузка материалов курса → per-course Qdrant
+- [x] Задачи: coding / MCQ / free text, публикация, отправки
+- [x] Python code judge
+- [x] AI-генерация черновиков (LangGraph + RAG-контекст)
+- [x] RAG-чат по курсу с Agent Checker (античит)
+- [x] Аналитика и прогресс студента
+- [ ] Полная проверка free-text ответов агентом
+- [ ] Расширенные типы задач и интеграции
 
 </details>
 
 <details>
-<summary><strong>Инфраструктура и интерфейсы</strong></summary>
+<summary><strong>RAG и материалы</strong></summary>
 
-- [x] Open WebUI
-- [x] OpenAI-совместимый API (`/v1`)
-- [x] Docker Compose (все сервисы)
-- [x] PostgreSQL для хранения диалогов
+- [x] Гибридный поиск (Dense + BM25)
+- [x] Celery-пайплайн: Docling/VLM PDF, chunking, индексация
+- [x] Per-course коллекции Qdrant
 - [x] LangSmith-трассировка
-- [ ] Тесты и документация по развёртыванию
+- [x] История диалогов (PostgreSQL)
+- [ ] GraphRAG и другие стратегии retrieval
+
+</details>
+
+<details>
+<summary><strong>Оркестратор и Telegram-агенты</strong></summary>
+
+- [x] LLM-классификация намерений (Telegram)
+- [ ] IntentRouter → Learning Agent
+- [ ] IntentRouter → Academic Agent
+- [ ] Квизы, план повторения, профили преподавателей
+
+</details>
+
+<details>
+<summary><strong>Инфраструктура</strong></summary>
+
+- [x] Docker Compose + Makefile
+- [x] OpenAI-совместимый API (`/v1`)
+- [x] Open WebUI (опциональный профиль)
+- [x] Upload Bot для материалов
+- [ ] E2E-тесты и production-документация
 
 </details>
 
@@ -213,4 +315,4 @@ docker compose up --build
 
 ## Статус проекта
 
-Проект в активной разработке. Список намерений и функциональность расширяются по мере развития.
+Проект в активной разработке. Основной функционал сосредоточен в **Ingestion Service** и **Problem Platform UI**; мультиагентный оркестратор для Telegram — следующий этап.
