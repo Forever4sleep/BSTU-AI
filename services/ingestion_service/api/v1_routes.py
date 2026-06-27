@@ -6,10 +6,15 @@ Optional RAG: augments chat messages with Qdrant retrieval (see rag/ package).
 """
 
 import asyncio
+import base64
 import copy
+import functools
 import json
 import logging
+import re
 import time
+import uuid
+from typing import Literal
 
 import httpx
 import langsmith as ls
@@ -18,11 +23,22 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from langsmith import traceable
 
 from config import get_config
+from rag.factory import RAGFactory
 from config.openrouter import (
     get_openrouter_api_key,
     get_openrouter_model,
 )
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from services.ingestion_service.db.problem_models import Course as Pcourse
+from services.ingestion_service.db.problem_models import CourseGroupAccess, PlatformStudent
 from services.ingestion_service.db.repository import ConversationRepository, derive_thread_id
+from services.ingestion_service.problem_platform.qdrant_naming import course_collection_from_slug
+from services.ingestion_service.problem_platform.platform_auth import (
+    decode_instructor_id_from_jwt,
+    decode_student_id_from_jwt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +47,16 @@ router = APIRouter(prefix="/v1", tags=["OpenAI-совместимый API"])
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 OPENROUTER_TIMEOUT_SECONDS = 120.0
 
+# Как для курсов в platform_routes (латиница, slug в БД в нижнем регистре)
+_BSTU_SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{2,126}$")
+
 
 # ── helpers ────────────────────────────────────────────────────────
+
+
+def _bstu_slug_param_ok(slug: str) -> bool:
+    s = slug.strip().lower()
+    return bool(s and _BSTU_SLUG_RE.match(s))
 
 
 def _extract_non_stream_content(data: dict) -> str:
@@ -87,13 +111,32 @@ def _is_meta_request(messages: list[dict]) -> bool:
     return False
 
 
-def _apply_rag_to_chat_body(body: dict, request: Request) -> dict:
+def _apply_rag_to_chat_body(
+    body: dict,
+    request: Request,
+    *,
+    collection_override: str | None = None,
+    course_slug: str | None = None,
+    anti_cheat_mode: str = "off",
+) -> dict:
     """Deep-copy body and inject retrieved context into messages (sync; run in thread)."""
     cfg = get_config()
     if not cfg.rag_enabled:
         return body
 
-    rag = getattr(request.app.state, "rag", None)
+    rag = None
+    if collection_override:
+        client = getattr(request.app.state, "qdrant_client", None)
+        if client is None:
+            return body
+        rag = RAGFactory.classic_for_collection(
+            client,
+            collection_override,
+            course_slug=course_slug,
+            anti_cheat_mode=anti_cheat_mode,
+        )
+    else:
+        rag = getattr(request.app.state, "rag", None)
     if rag is None:
         return body
 
@@ -112,6 +155,114 @@ def _apply_rag_to_chat_body(body: dict, request: Request) -> dict:
 
     rag.augment(msgs)
     return out
+
+
+async def _student_may_use_course_chat_rag(session: AsyncSession, student: PlatformStudent, course: Pcourse) -> bool:
+    """Студент: курс с чатом, публичный или групповой доступ с chat_ai_allowed."""
+    if not bool(getattr(course, "chat_assistant_enabled", True)):
+        return False
+    vm = getattr(course, "visibility_mode", None) or "public"
+    if vm == "public":
+        return True
+    if not student.study_group_id:
+        return False
+    acc = await session.scalar(
+        select(CourseGroupAccess).where(
+            CourseGroupAccess.course_id == course.id,
+            CourseGroupAccess.study_group_id == student.study_group_id,
+            CourseGroupAccess.problems_visible.is_(True),
+            CourseGroupAccess.chat_ai_allowed.is_(True),
+        )
+    )
+    return acc is not None
+
+
+def _normalize_anti_cheat_mode(raw: str | None) -> Literal["off", "basic", "advanced"]:
+    v = (raw or "advanced").strip().lower()
+    if v in ("off", "basic", "advanced"):
+        return v  # type: ignore[return-value]
+    return "advanced"
+
+
+async def _resolve_course_rag_context(
+    request: Request, body: dict
+) -> tuple[str, str, Literal["off", "basic", "advanced"]] | None:
+    """
+    Удаляет из тела bstu_course_id и/или bstu_course_slug (не уходит в OpenRouter),
+    проверяет JWT преподавателя (владение курсом) или студента (доступ + чат) —
+    имя коллекции Qdrant для RAG и slug курса (для anti-cheat по задачам).
+
+    Корректировать контекст курса можно либо по UUID, либо по slug (slug — для совместимости,
+    когда в ответе /api/public/my/courses ещё нет поля id).
+    Нельзя передавать оба параметра одновременно.
+    """
+    raw_id = body.pop("bstu_course_id", None)
+    raw_slug = body.pop("bstu_course_slug", None)
+    have_id = raw_id not in (None, "")
+    have_slug = raw_slug not in (None, "") and str(raw_slug).strip() != ""
+
+    if not have_id and not have_slug:
+        return None
+    if have_id and have_slug:
+        raise HTTPException(
+            status_code=400,
+            detail="Укажите только один параметр: bstu_course_id или bstu_course_slug.",
+        )
+
+    cfg = get_config()
+    secret = getattr(cfg, "platform_jwt_secret", None)
+    if not secret:
+        raise HTTPException(status_code=500, detail="platform_jwt_secret not configured")
+
+    auth = request.headers.get("Authorization") or ""
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="RAG по курсу требует Authorization: Bearer JWT платформы")
+    raw_tok = auth[7:].strip()
+    if not _is_compact_jwt_payload(raw_tok):
+        raise HTTPException(status_code=401, detail="Для контекста курса нужен JWT платформы (не ключ OpenRouter)")
+
+    instructor_id = decode_instructor_id_from_jwt(raw_tok, secret)
+    student_record_id = decode_student_id_from_jwt(raw_tok, secret)
+    if instructor_id is None and student_record_id is None:
+        raise HTTPException(status_code=401, detail="Invalid platform JWT")
+
+    factory = getattr(request.app.state, "session_factory", None)
+    if factory is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    async with factory() as session:
+        row: Pcourse | None = None
+        if have_id:
+            try:
+                course_uuid = uuid.UUID(str(raw_id).strip())
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid bstu_course_id") from None
+            row = await session.get(Pcourse, course_uuid)
+        else:
+            if not _bstu_slug_param_ok(str(raw_slug)):
+                raise HTTPException(status_code=400, detail="Invalid bstu_course_slug")
+            slug_lc = str(raw_slug).strip().lower()
+            row = await session.scalar(select(Pcourse).where(func.lower(Pcourse.slug) == slug_lc))
+
+        if row is None:
+            raise HTTPException(status_code=404, detail="Course not found")
+
+        if instructor_id is not None:
+            if row.instructor_id != instructor_id:
+                raise HTTPException(status_code=404, detail="Course not found")
+        else:
+            st_row = await session.get(PlatformStudent, student_record_id)
+            if st_row is None:
+                raise HTTPException(status_code=401, detail="Invalid platform JWT")
+            if not bool(getattr(row, "chat_assistant_enabled", True)):
+                raise HTTPException(status_code=403, detail="Чат-ассистент для этого курса отключён.")
+            if not await _student_may_use_course_chat_rag(session, st_row, row):
+                raise HTTPException(status_code=403, detail="Чат с ИИ по этому курсу недоступен.")
+
+        cn = (row.qdrant_collection_name or "").strip()
+        slug = row.slug.strip().lower()
+        mode = _normalize_anti_cheat_mode(getattr(row, "anti_cheat_mode", None))
+        return (cn or course_collection_from_slug(row.slug), slug, mode)
 
 
 @traceable(run_type="llm", name="openrouter_llm_proxy")
@@ -146,19 +297,53 @@ async def v1_root() -> dict[str, str | list[str]]:
     }
 
 
+def _is_compact_jwt_payload(token: str) -> bool:
+    """Стандартный compact JWT (3 сегмента, JSON в заголовке) — платформа, не ключ OpenRouter."""
+    parts = token.split(".")
+    if len(parts) != 3:
+        return False
+    hdr_b64, _, sig = parts
+    if len(hdr_b64) < 4 or len(sig) < 4:
+        return False
+    if not hdr_b64.startswith("eyJ"):
+        return False
+    pad = "=" * (-len(hdr_b64) % 4)
+    try:
+        hdr = json.loads(base64.urlsafe_b64decode(hdr_b64 + pad))
+    except Exception:
+        return False
+    return isinstance(hdr, dict) and isinstance(hdr.get("alg"), str)
+
+
 async def _get_auth_header(request: Request) -> str:
-    """Extract Bearer token from request, or use OpenRouter API key."""
+    """Bearer OpenRouter/sk-* — пробрасываем; JWT платформы / пусто — ключ из OPENROUTER_API_KEY."""
+    try:
+        server_key = get_openrouter_api_key()
+    except ValueError:
+        server_key = None
+
     auth = request.headers.get("Authorization")
     if auth and auth.startswith("Bearer "):
-        return auth
-    try:
-        api_key = get_openrouter_api_key()
-    except ValueError:
+        raw = auth[7:].strip()
+        if raw.startswith(("sk-or-", "sk-proj-")):
+            return auth
+        if _is_compact_jwt_payload(raw):
+            if not server_key:
+                raise HTTPException(
+                    status_code=500,
+                    detail="OPENROUTER_API_KEY not set — JWT сессию подставить в OpenRouter нельзя.",
+                )
+            return f"Bearer {server_key}"
+        # Не JWT: возможно свой OpenRouter / legacy — пробуем как есть при наличии ключа-сервера нет ошибки upstream
+        if raw:
+            return auth
+
+    if not server_key:
         raise HTTPException(
             status_code=500,
-            detail="OPENROUTER_API_KEY not set. Set it in .env or pass Authorization header.",
+            detail="OPENROUTER_API_KEY not set. Set it in .env or pass Authorization: Bearer sk-or-…",
         )
-    return f"Bearer {api_key}"
+    return f"Bearer {server_key}"
 
 
 @router.get("/models", summary="Список моделей")
@@ -197,6 +382,11 @@ async def chat_completions(request: Request, bg: BackgroundTasks):
 
     original_messages = body.get("messages", [])
 
+    rag_ctx = await _resolve_course_rag_context(request, body)
+    rag_collection = rag_ctx[0] if rag_ctx else None
+    course_slug = rag_ctx[1] if rag_ctx else None
+    anti_cheat_mode = rag_ctx[2] if rag_ctx else "off"
+
     model = body.get("model") or get_openrouter_model()
     body["model"] = model
 
@@ -214,8 +404,17 @@ async def chat_completions(request: Request, bg: BackgroundTasks):
 
     stream = body.get("stream", False)
 
+    rag_part = functools.partial(
+        _apply_rag_to_chat_body,
+        body,
+        request,
+        collection_override=rag_collection,
+        course_slug=course_slug,
+        anti_cheat_mode=anti_cheat_mode,
+    )
+
     if stream:
-        body = await asyncio.to_thread(_apply_rag_to_chat_body, body, request)
+        body = await asyncio.to_thread(rag_part)
         collected_text: list[str] = []
 
         async def stream_generator():
@@ -263,7 +462,7 @@ async def chat_completions(request: Request, bg: BackgroundTasks):
         run_type="chain",
         inputs={"messages": original_messages, "model": model},
     ) as root_rt:
-        body = await asyncio.to_thread(_apply_rag_to_chat_body, body, request)
+        body = await asyncio.to_thread(rag_part)
 
         try:
             data = await _call_openrouter(url, body, headers)

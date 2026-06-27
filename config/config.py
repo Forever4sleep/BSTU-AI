@@ -97,6 +97,16 @@ class Config(BaseSettings):
         ge=0.0,
         description="Минимальный RRF-скор лучшего документа; ниже — отказ. 0 = отключено",
     )
+    rag_problem_match_enabled: bool = Field(
+        default=True,
+        description="Глобальный выключатель античита; при false режим курса игнорируется",
+    )
+    rag_problem_match_threshold: float = Field(
+        default=0.82,
+        ge=0.0,
+        le=1.0,
+        description="Порог cosine similarity для базового античита (сопоставление с условием задачи)",
+    )
 
     # --- Ingestion Service ---
     ingestion_service_port: int = Field(default=8001, description="Порт API")
@@ -129,6 +139,18 @@ class Config(BaseSettings):
         default=120,
         description="Timeout VLM запросов (сек)",
     )
+    vlm_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=16,
+        description="Параллельных запросов к VLM API (OpenRouter) на одну PDF",
+    )
+    vlm_batch_size: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description="Страниц PDF в одной партии (Docling settings.perf.page_batch_size)",
+    )
 
     # --- Embeddings ---
     embedding_model: str = Field(
@@ -144,16 +166,47 @@ class Config(BaseSettings):
     # --- Database (PostgreSQL conversation storage) ---
     ingestion_db_url: str | None = Field(default=None, description="PostgreSQL URL (asyncpg)")
 
+    # --- Problems platform ---
+    platform_bootstrap_secret: str | None = Field(
+        default=None,
+        description="Bootstrap преподавателя (HEADER X-Platform-Bootstrap-Secret → POST /api/platform/instructors/bootstrap)",
+    )
+    platform_admin_username: str | None = Field(
+        default=None,
+        description="Логин платформенного администратора (вместе с PLATFORM_ADMIN_PASSWORD + PLATFORM_JWT_SECRET)",
+    )
+    platform_admin_password: str | None = Field(
+        default=None,
+        description="Пароль администратора из .env (plain); для продакена лучше длинная случайная строка",
+    )
+    platform_admin_secret: str | None = Field(
+        default=None,
+        description="Устарело: не используется",
+    )
+    platform_jwt_secret: str | None = Field(
+        default=None,
+        description="HS256 для JWT преподавателя, платформенного администратора и студентов (Bearer)",
+    )
+    platform_jwt_expire_hours: int = Field(
+        default=168,
+        ge=1,
+        le=8760,
+        description="TTL access_token преподавателя (JWT), часов",
+    )
+    cors_origins: str = Field(
+        default="http://localhost:5173,http://127.0.0.1:5173",
+        description="Разрешённые origins для CORS (через запятую)",
+    )
+    code_judge_timeout_sec: int = Field(default=8, ge=1, le=120, description="Таймаут одного прогона код-судьи")
+    platform_draft_max_retries: int = Field(default=2, ge=0, le=5)
+
     @model_validator(mode="after")
     def validate_chunk_params(self) -> "Config":
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError(
                 f"chunk_overlap ({self.chunk_overlap}) must be < chunk_size ({self.chunk_size})"
             )
-        if self.rag_hybrid_dense_weight + self.rag_hybrid_bm25_weight <= 0:
-            raise ValueError(
-                "rag_hybrid_dense_weight + rag_hybrid_bm25_weight must be > 0 for hybrid RAG"
-            )
+        # Гибрид задаётся одним коэффициентом rag_hybrid_alpha (см. rag/factory.py)
         return self
 
     # --- Properties ---
@@ -164,6 +217,20 @@ class Config(BaseSettings):
         materials_path = Path(__file__).resolve().parent.parent / "data" / "materials"
         materials_path.mkdir(parents=True, exist_ok=True)
         return materials_path
+
+    @property
+    def upload_history_dir(self) -> Path:
+        """JSONL-журнал неудачных загрузок материалов курса (папка «История» на диске)."""
+        p = Path(__file__).resolve().parent.parent / "data" / "upload_history"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    @property
+    def student_avatars_dir(self) -> Path:
+        """Фото профилей студентов на диске (не попадают в ответах API как строка)."""
+        p = Path(__file__).resolve().parent.parent / "data" / "student_avatars"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
 
     @property
     def embedding_api_key(self) -> str:
@@ -181,6 +248,10 @@ class Config(BaseSettings):
         if self.openrouter_api_key:
             return "https://openrouter.ai/api/v1"
         return "https://api.openai.com/v1"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
     def allowed_upload_user_ids_list(self) -> list[int]:
@@ -235,8 +306,8 @@ def get_allowed_upload_user_ids() -> list[int]:
 
 
 def get_openrouter_api_key() -> str:
-    """OpenRouter API key. Raises если не задан."""
-    api_key = get_config().openrouter_api_key
+    """OpenRouter API key. Raises если не задан (пустой после strip тоже не считается)."""
+    api_key = (get_config().openrouter_api_key or "").strip()
     if not api_key:
         raise ValueError("OPENROUTER_API_KEY не задан в .env")
     return api_key

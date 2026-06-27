@@ -15,7 +15,10 @@ def make_celery() -> Celery:
         "ingestion",
         broker=config.celery_broker_url,
         backend=backend,
-        include=["services.ingestion_service.tasks"],
+        include=[
+            "services.ingestion_service.tasks",
+            "services.ingestion_service.tasks_platform",
+        ],
     )
     app.conf.update(
         task_serializer="json",

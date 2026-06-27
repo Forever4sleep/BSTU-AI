@@ -19,6 +19,7 @@ from docling.datamodel.vlm_engine_options import (
     ApiVlmEngineOptions,
     VlmEngineType,
 )
+from docling.datamodel.settings import settings
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.pipeline.vlm_pipeline import VlmPipeline
 
@@ -63,12 +64,24 @@ def _create_converter():
                 "max_tokens": 4096,
             },
             timeout=cfg.vlm_timeout,
+            concurrency=cfg.vlm_concurrency,
         ),
     )
     updated_spec = base_options.model_spec.model_copy(
         update={"default_repo_id": cfg.vlm_model}
     )
     vlm_options = base_options.model_copy(update={"model_spec": updated_spec})
+
+    # Docling splits PDF pages using global settings.perf.page_batch_size (NOT vlm_options.batch_size).
+    settings.perf.page_batch_size = cfg.vlm_batch_size
+
+    logger.info(
+        "VLM PDF parser: model=%s concurrency=%s page_batch_size=%s timeout=%ss",
+        cfg.vlm_model,
+        cfg.vlm_concurrency,
+        cfg.vlm_batch_size,
+        cfg.vlm_timeout,
+    )
 
     pipeline_options = VlmPipelineOptions(
         vlm_options=vlm_options,
@@ -99,7 +112,7 @@ def parse_document(file_path: Path) -> str:
     """
     Parse a document and extract text.
 
-    PDF: Docling VLM (qwen-2.5-vl via OpenRouter).
+    PDF: Docling VLM (OpenRouter vision model).
     DOCX, PPTX, XLSX, MD, HTML, CSV, изображения: Docling нативные бэкенды.
     TXT: read_text.
     """
@@ -135,6 +148,8 @@ def parse_document(file_path: Path) -> str:
 
 def _parse_with_docling(file_path: Path) -> str:
     """Извлечь текст через Docling (все форматы кроме TXT)."""
+    cfg = get_config()
+    settings.perf.page_batch_size = cfg.vlm_batch_size
     converter = _get_converter()
     path_str = str(file_path.resolve())
     result = converter.convert(path_str)

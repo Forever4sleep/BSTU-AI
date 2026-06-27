@@ -43,6 +43,28 @@ class MessagePreprocessor:
         return None
 
     @classmethod
+    def dialogue_transcript(
+        cls,
+        messages: list[dict[str, Any]],
+        *,
+        max_messages: int = 12,
+    ) -> str:
+        """Recent user/assistant turns for Agent Checker (excludes system)."""
+        lines: list[str] = []
+        for m in messages:
+            role = m.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            text = cls.extract_text(m.get("content")).strip()
+            if not text:
+                continue
+            label = "Студент" if role == "user" else "Ассистент"
+            lines.append(f"{label}: {text}")
+        if max_messages > 0:
+            lines = lines[-max_messages:]
+        return "\n\n".join(lines)
+
+    @classmethod
     def strip_system_by_marker(
         cls,
         messages: MutableSequence[dict[str, Any]],
