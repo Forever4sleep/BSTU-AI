@@ -1,0 +1,162 @@
+# Usage (или `make help`):
+#   cp .env.example .env   # минимум: OPENROUTER_API_KEY (+ PLATFORM_BOOTSTRAP_SECRET для /api/platform)
+#   Стек без пересборки каждый раз:  make stack-full    (или make up + профили при необходимости)
+#   После изменения requirements.txt или Dockerfile:  make build   или   make stack-full-build
+#
+# Web UIs:
+#   Qdrant:         http://localhost:6333/dashboard
+#   Swagger:        http://localhost:8001/docs
+#   Open WebUI:     http://localhost:3000  (чат → ingestion-service → OpenRouter)
+#   Задачи (Vite):  http://localhost:5173  (profile platform)
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  ingestion-service:
+    build: .
+    command: uvicorn services.ingestion_service.main:app --host 0.0.0.0 --port 8001
+    env_file: .env
+    environment:
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      CELERY_BROKER_URL: redis://redis:6379/0
+      INGESTION_DB_URL: postgresql+asyncpg://bstu:${POSTGRES_PASSWORD:-bstu_dev}@postgres:5432/bstu_ai
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-bstu-ai-rag}
+    ports:
+      - "8001:8001"
+    # Код с хоста — не нужно пересобирать образ после правок API (как у Vite с ./frontend)
+    volumes:
+      - .:/app
+      - materials_data:/app/data/materials
+    depends_on:
+      - qdrant
+      - redis
+      - postgres
+
+  celery-worker:
+    build: .
+    # VLM PDF: Docling rasterizes pages locally — one worker process at a time, recycle after each task.
+    command: celery -A services.ingestion_service.celery_app worker --loglevel=info --concurrency=1 --max-tasks-per-child=1
+    env_file: .env
+    environment:
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      CELERY_BROKER_URL: redis://redis:6379/0
+      INGESTION_DB_URL: postgresql+asyncpg://bstu:${POSTGRES_PASSWORD:-bstu_dev}@postgres:5432/bstu_ai
+    volumes:
+      # Как у ingestion-service: актуальный код с хоста (иначе новые Celery-задачи не попадают в воркер без пересборки).
+      - .:/app
+      - materials_data:/app/data/materials
+      # Журнал ошибок индексации (тот же каталог, что у API с .:/app → data/upload_history)
+      - ./data/upload_history:/app/data/upload_history
+    depends_on:
+      - qdrant
+      - redis
+      - postgres
+    mem_limit: 4g
+    healthcheck:
+      test: ["CMD", "python", "scripts/celery_broker_healthcheck.py"]
+      interval: 20s
+      timeout: 8s
+      retries: 3
+      start_period: 45s
+
+  problem-platform-ui:
+    image: node:22-alpine
+    working_dir: /app
+    # node_modules в томе: при каждом старте npm install — новые пакеты из package.json подтянутся сами (после git pull).
+    # Если том битый и нет refresh-runtime.js — дополнительно очищаем только содержимое node_modules и ставим снова.
+    command:
+      - sh
+      - -c
+      - |
+          set -e
+          echo "platform-ui: npm install (актуальные зависимости под package.json/package-lock.json)…"
+          npm install --no-audit --fund=false
+          RTF="node_modules/@vitejs/plugin-react/dist/refresh-runtime.js"
+          if [ ! -f "$RTF" ]; then
+            echo "platform-ui: @vitejs/plugin-react не собран — очищаем содержимое node_modules и npm install повторно…"
+            if [ -d node_modules ]; then
+              chmod -R u+w node_modules 2>/dev/null || true
+              find node_modules -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || rm -rf node_modules/* 2>/dev/null || true
+            fi
+            npm install --no-audit --fund=false
+          fi
+          exec npm run dev -- --host 0.0.0.0 --port 5173
+    volumes:
+      - ./frontend:/app
+      - platform_ui_node_modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      NODE_ENV: development
+      DEV_PROXY_TARGET: http://ingestion-service:8001
+    depends_on:
+      - ingestion-service
+    profiles:
+      - platform
+
+  telegram-bot:
+    profiles: [bots]
+    build: .
+    command: python run_telegram_bot.py
+    env_file: .env
+    depends_on:
+      - ingestion-service
+
+  upload-bot:
+    profiles: [bots]
+    build: .
+    command: python -m services.upload_bot.main
+    env_file: .env
+    environment:
+      INGESTION_SERVICE_URL: http://ingestion-service:8001
+    depends_on:
+      - ingestion-service
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: bstu_ai
+      POSTGRES_USER: bstu
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bstu_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  open-webui:
+    profiles: [openwebui]
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    ports:
+      - "3000:8080"
+    volumes:
+      - open_webui_data:/app/backend/data
+    env_file: .env
+    environment:
+      OPENAI_API_BASE_URLS: http://ingestion-service:8001/v1
+      OPENAI_API_KEYS: ${OPENROUTER_API_KEY}
+      ENABLE_SIGNUP: "true"
+    depends_on:
+      - ingestion-service
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+  materials_data:
+  open_webui_data:
+  postgres_data:
+  platform_ui_node_modules:

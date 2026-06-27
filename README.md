@@ -1,50 +1,75 @@
-# BSTU-AI
+<p align="center">
+  <strong>BSTU-AI</strong>
+</p>
+<p align="center">
+  <em>Интеллектуальная платформа для обучения студентов БГТУ</em>
+</p>
 
 A multi-agent AI system designed to help students automate academic tasks, accelerate learning, and enhance productivity.
 
 ## Purpose 
 
-BSTU-AI is a diploma project which introduces a multi-agent system that helps students automate certain activities, learn stuff quicker and be overall more productive. 
+---
 
-## Functionality
+## О проекте
 
-Currently, I am planning on building three separate agents with their own responsibility domain.
+**BSTU-AI** — дипломный проект: платформа для студентов и преподавателей БГТУ с RAG-чатом по учебным материалам, задачами (код, тесты, свободный ответ), AI-генерацией черновиков заданий и администрированием курсов.
 
-| Agent | What it does |
-| ----- | ------------ |
-| <b>Learning Agent</b> | Helps students learn a subject faster using pre-loaded materials: notes, lectures and so on.   Uses the RAG concept as the underlying mechanism of using materials unique to BSTU. I am also planning on adding quizes for better retention. |
-| <b>Academic Agent</b> | Used as the go-to helper to retrieve useful information about the professors, exam requirements, passing criterion – all in one place.|  
-| <b>Scheduler Agent</b> | Buddy that helps you set a reminder for an upcoming coursework deadline, exam – all via Telegram and zero buttons, just raw text! |
+Центральный backend — **Ingestion Service** (FastAPI): индексация документов, OpenAI-совместимый чат, REST платформы задач и фоновые Celery-задачи.
 
-Agents are managed by the <b>orchestator</b>.
-An orchestator, in the content of BSTU-AI, is a mechanism that helps understand the end user, what they're asking right now. It extracts the intents of a user's request and then decides which agent to utilize.
+Пользовательские интерфейсы:
 
-Right now there's an undefined number of intents, though there are draft ones. As I make progress in building this project, I am going to fill up this list more and more and make it more accurate. 
+| Интерфейс | Назначение |
+|-----------|------------|
+| **Problem Platform UI** (`frontend/`, :5173) | Основной веб-интерфейс: студенты, преподаватели, админ |
+| **Open WebUI** (:3000, опционально) | Универсальный чат поверх `/v1/chat/completions` |
+| **Telegram Bot** (опционально) | Классификация намерений; маршрутизация к агентам — в разработке |
+| **Upload Bot** (опционально) | Загрузка материалов админами через Telegram |
 
-### Learning Agent
+---
 
-| Intent | Description | 
-| ------ | ----------- | 
-| learning.explain | explain a topic using reference material specific to BSTU. | 
-| learning.summarize | create a summary of a topic. | 
-| learning.quiz.generate | come up with a quiz to test the user's knowledge. | 
-| learning.quiz.grade | check the user's answers and provide explanations to the mistakes made. | 
-| learning.plan.revision | propose a revision plan in accordance with the user's weak links. | 
+## Технологический стек
 
+| Компонент | Технология |
+|-----------|------------|
+| Backend | Python 3.11+, FastAPI, Celery |
+| Frontend | React 18, TypeScript, Vite, Monaco Editor |
+| LLM / эмбеддинги | OpenRouter (LangChain, LangGraph) |
+| Векторная БД | Qdrant (глобальная коллекция + коллекции на курс) |
+| Реляционная БД | PostgreSQL (диалоги, курсы, задачи, пользователи) |
+| Очередь | Redis + Celery |
+| Парсинг документов | Docling (VLM для PDF через OpenRouter) |
+| RAG | Гибридный поиск (Dense + BM25), промпты из YAML |
+| Трассировка | LangSmith |
+| Контейнеризация | Docker Compose, Makefile |
 
-### Academic Agent 
+---
 
-| Intent | Description | 
-| ------ | ----------- | 
-| academic.professor.profile | provide info on a professor and their courses. |
-| academic.course.requirements | list course requirements to sit for the exam, evaluation criterion |
+## Архитектура
 
-### Scheduler Agent
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Интерфейсы                               │
+│  Problem Platform UI   Open WebUI   Telegram Bot   Upload Bot   │
+│       :5173               :3000          (bots)       (bots)    │
+└────────────┬────────────────┬──────────────┬──────────────┬─────┘
+             │                │              │              │
+             └────────────────┴──────────────┴──────────────┘
+                                    │
+                          Ingestion Service :8001
+                    ┌─────────────────┼─────────────────┐
+                    │                 │                 │
+              /api/upload      /api/platform      /v1/chat/completions
+              /api/jobs        /api/public              │
+                    │                 │            RAG (rag/)
+                    ▼                 ▼                 ▼
+              Celery Worker    PostgreSQL          OpenRouter
+                    │          (platform + chats)
+                    ▼
+                 Qdrant
+           (bstu_materials + course_*)
+```
 
-| Intent | Description | 
-| ------ | ----------- | 
-| schedule.lookup | look up the certain event's date, class schedule. |
-| schedule.deadline.lookup | find deadline (if there's one) |
-| schedule.reminder.create | create a reminder (implemented via Telegram)| 
+### Ingestion Service
 
 TO BE CONTINUED...
